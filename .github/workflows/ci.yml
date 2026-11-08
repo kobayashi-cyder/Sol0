@@ -237,3 +237,77 @@ jobs:
           assert row_before==row_after,(row_before,row_after)
           print('Success: Qwen Q8 full-row weight calculation from verified chunks with zero reconstructed model files')
           PY
+
+  # Complete text inference from native tensor-sharded GGUF with no joined
+  # model file. llama.cpp still computes every necessary layer and requires RAM.
+  # Independent of the low-level Node Q8 slice arithmetic prototype above.
+  qwen-sharded-generation-e2e:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build pinned offline llama.cpp split tool and server
+        run: |
+          git clone --depth 1 --branch b12135 https://github.com/ggml-org/llama.cpp.git /tmp/sol0-shard-llama
+          cmake -S /tmp/sol0-shard-llama -B /tmp/sol0-shard-build \
+            -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DGGML_NATIVE=OFF
+          cmake --build /tmp/sol0-shard-build \
+            --target llama-gguf-split llama-server --parallel 2
+      - name: Download official Qwen model and verify complete publisher SHA256
+        run: |
+          curl --fail --location --retry 3 --max-time 600 \
+            --output /tmp/sol0-shard-source.gguf \
+            https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+          echo '9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031  /tmp/sol0-shard-source.gguf' | sha256sum --check
+      - name: Split GGUF by tensor and DELETE original before inference
+        run: |
+          mkdir /tmp/sol0-native-shards
+          /tmp/sol0-shard-build/bin/llama-gguf-split --split-max-tensors 32 \
+            /tmp/sol0-shard-source.gguf /tmp/sol0-native-shards/qwen3-q8
+          count=$(find /tmp/sol0-native-shards -maxdepth 1 -type f -name '*.gguf' | wc -l)
+          test "$count" -ge 2
+          find /tmp/sol0-native-shards -maxdepth 1 -type f -name '*.gguf' -print0 \
+            | sort -z | xargs -0 sha256sum > /tmp/sol0-native-shard-checksums
+          rm /tmp/sol0-shard-source.gguf
+          test ! -e /tmp/sol0-shard-source.gguf
+          (cd / && sha256sum --check /tmp/sol0-native-shard-checksums)
+          first=$(find /tmp/sol0-native-shards -maxdepth 1 -type f -name '*-00001-of-*.gguf' | head -n 1)
+          test -n "$first"
+          test -f "$first"
+          echo "$first" > /tmp/sol0-first-native-shard-path
+          echo "Native tensor-aligned GGUF shards: $count; no joined model file exists"
+      - name: Generate an actual Qwen answer using native shards through Sol0
+        run: |
+          first=$(cat /tmp/sol0-first-native-shard-path)
+          test -f "$first"
+          test ! -e /tmp/sol0-shard-source.gguf
+          node tools/qwen_local.mjs --model="$first" \
+            --runner=/tmp/sol0-shard-build/bin/llama-server \
+            > /tmp/sol0-native-sharded-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 150); do
+            if curl --silent --fail --max-time 2 http://127.0.0.1:9931/health | grep -q '"status":"ok"'; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              tail -n 100 /tmp/sol0-native-sharded-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            tail -n 100 /tmp/sol0-native-sharded-server.log
+            echo 'Tensor-sharded Qwen did not become ready'
+            exit 1
+          fi
+          node tools/local_model_smoke.mjs --consent \
+            --endpoint=http://127.0.0.1:9931/v1/chat/completions \
+            --model=sol0-qwen
+          echo 'SUCCESS: native-shard Qwen generated text through Sol0 without GGUF merge'
