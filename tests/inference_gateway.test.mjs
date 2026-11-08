@@ -126,3 +126,68 @@ test('no unbounded input, output, model metadata or response payloads', async ()
   });
   await assert.rejects(() => malformed.generate('test', { consent: true }), /bounded/);
 });
+
+
+test('streamed HTTP response is bounded before accumulating untrusted bytes', async () => {
+  let cancelled = false;
+  const chunk = new Uint8Array(160000);
+  const provider = createHTTPChatProvider({
+    endpoint, modelRecord: record, networkPolicy: policy(),
+    fetchImpl: async () => ({
+      ok: true,
+      body: {
+        getReader() {
+          let count = 0;
+          return {
+            async read() {
+              count++;
+              if (count <= 2) return { done: false, value: chunk };
+              return { done: true };
+            },
+            async cancel() { cancelled = true; },
+            releaseLock() {}
+          };
+        }
+      },
+      text() { throw Error('unbounded text() must not be called'); }
+    })
+  });
+  await assert.rejects(() => provider.generate('test', { consent: true }), /exceeds/);
+  assert.equal(cancelled, true);
+});
+
+test('HTTP rejects oversized declared length before reading response body', async () => {
+  const provider = createHTTPChatProvider({
+    endpoint, modelRecord: record, networkPolicy: policy(),
+    fetchImpl: async () => ({
+      ok: true,
+      headers: { get: name => name === 'content-length' ? '999999999' : null },
+      text() { throw Error('should not read oversized body'); }
+    })
+  });
+  await assert.rejects(() => provider.generate('test', { consent: true }), /exceeds/);
+});
+
+test('streamed UTF-8 split across chunks is decoded correctly', async () => {
+  const bytes = new TextEncoder().encode('{"choices":[{"message":{"content":"こんにちは"}}]}');
+  const chunks = [bytes.slice(0, 36), bytes.slice(36, 38), bytes.slice(38)];
+  const provider = createHTTPChatProvider({
+    endpoint, modelRecord: record, networkPolicy: policy(),
+    fetchImpl: async () => ({
+      ok: true,
+      body: {
+        getReader() {
+          let index = 0;
+          return {
+            async read() {
+              return index < chunks.length ? { done: false, value: chunks[index++] } : { done: true };
+            },
+            async cancel() {},
+            releaseLock() {}
+          };
+        }
+      }
+    })
+  });
+  assert.equal(await provider.generate('test', { consent: true }), 'こんにちは');
+});
