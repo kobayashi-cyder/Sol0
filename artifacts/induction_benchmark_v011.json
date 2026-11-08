@@ -1,0 +1,33 @@
+{
+  "benchmark": "synthetic two-input numeric rule inference with unseen, out-of-range inputs",
+  "seeded": true,
+  "selection": "train only",
+  "holdout": "values 10..30; training values -9..9",
+  "taskCount": 100,
+  "passed": 100,
+  "rejected": 0,
+  "holdoutAccuracy": 1,
+  "families": {
+    "affine": {
+      "passed": 20,
+      "total": 20
+    },
+    "product": {
+      "passed": 20,
+      "total": 20
+    },
+    "absdiff": {
+      "passed": 20,
+      "total": 20
+    },
+    "max": {
+      "passed": 20,
+      "total": 20
+    },
+    "min": {
+      "passed": 20,
+      "total": 20
+    }
+  },
+  "failed": []
+}

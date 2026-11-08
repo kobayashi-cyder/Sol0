@@ -1,0 +1,120 @@
+{
+  "task": "synthetic Japanese intent classification (six labels)",
+  "constraint": "no pretrained weights / tokenizer / teacher",
+  "split": "distinct train and holdout templates; unique examples",
+  "seed": 20261106,
+  "epochs": 32,
+  "train_examples": 1152,
+  "holdout_examples": 324,
+  "parameters": 24582,
+  "baseline": {
+    "accuracy": 0.07716049253940582,
+    "correct": 25,
+    "total": 324,
+    "loss": 1.7922697067260742
+  },
+  "final": {
+    "accuracy": 0.8858024477958679,
+    "correct": 287,
+    "total": 324,
+    "loss": 0.34206220507621765
+  },
+  "quantized": {
+    "correct": 287,
+    "total": 324,
+    "accuracy": 0.8858024691358025
+  },
+  "curve": [
+    {
+      "epoch": 1,
+      "train": {
+        "accuracy": 1.0,
+        "correct": 1152,
+        "total": 1152,
+        "loss": 0.09735407680273056
+      },
+      "holdout": {
+        "accuracy": 0.7993826866149902,
+        "correct": 259,
+        "total": 324,
+        "loss": 0.7373917698860168
+      }
+    },
+    {
+      "epoch": 2,
+      "train": {
+        "accuracy": 1.0,
+        "correct": 1152,
+        "total": 1152,
+        "loss": 0.02069048210978508
+      },
+      "holdout": {
+        "accuracy": 0.8580247163772583,
+        "correct": 278,
+        "total": 324,
+        "loss": 0.5230513215065002
+      }
+    },
+    {
+      "epoch": 4,
+      "train": {
+        "accuracy": 1.0,
+        "correct": 1152,
+        "total": 1152,
+        "loss": 0.008942743763327599
+      },
+      "holdout": {
+        "accuracy": 0.8672839403152466,
+        "correct": 281,
+        "total": 324,
+        "loss": 0.4738686978816986
+      }
+    },
+    {
+      "epoch": 8,
+      "train": {
+        "accuracy": 1.0,
+        "correct": 1152,
+        "total": 1152,
+        "loss": 0.004750293679535389
+      },
+      "holdout": {
+        "accuracy": 0.8796296119689941,
+        "correct": 285,
+        "total": 324,
+        "loss": 0.42036405205726624
+      }
+    },
+    {
+      "epoch": 16,
+      "train": {
+        "accuracy": 1.0,
+        "correct": 1152,
+        "total": 1152,
+        "loss": 0.0021487511694431305
+      },
+      "holdout": {
+        "accuracy": 0.8827160596847534,
+        "correct": 286,
+        "total": 324,
+        "loss": 0.38025426864624023
+      }
+    },
+    {
+      "epoch": 32,
+      "train": {
+        "accuracy": 1.0,
+        "correct": 1152,
+        "total": 1152,
+        "loss": 0.0008531294297426939
+      },
+      "holdout": {
+        "accuracy": 0.8858024477958679,
+        "correct": 287,
+        "total": 324,
+        "loss": 0.34206220507621765
+      }
+    }
+  ],
+  "scope": "narrow classification only; not natural language understanding or general intelligence"
+}
