@@ -58,3 +58,32 @@ test('import refuses storage quota failure before replacing live state',async()=
  assert.match(notices.join(' '),/容量/);
  assert.equal(event.target.value,'');
 });
+
+test('invalid imports never replace chat or write storage',async()=>{
+ const begin=source.indexOf('async function importJson(event){');
+ const finish=source.indexOf('\nfunction changeTheme(',begin);
+ assert.ok(begin>=0&&finish>begin);
+ const cases=[
+  {name:'malformed JSON',body:'{broken',size:7},
+  {name:'unsupported schema',body:encode([msg('user','incoming')],99)},
+  {name:'missing chats',body:JSON.stringify({schema:3,chats:null})},
+  {name:'oversize file',body:encode([msg('user','incoming')]),size:4000001},
+  {name:'oversize text',body:'x'.repeat(4000001),size:4000001}
+ ];
+ for(const entry of cases){
+  const original={schema:3,chats:[{id:'existing',messages:[msg('user','keep me')]}],wsp:{marker:'existing'}};
+  const writes=[];
+  const notices=[];
+  const context={db:original,DB_KEY:'test-key',schemaRead,confirm:()=>{throw Error('invalid input must not prompt');},
+   localStorage:{setItem(...args){writes.push(args);}},notify:(message)=>notices.push(message)};
+  const importJson=vm.runInNewContext(source.slice(begin,finish)+'\nimportJson',context,{timeout:1000});
+  const event={target:{files:[{size:entry.size??entry.body.length,text:async()=>entry.body}],value:'selected'}};
+  await importJson(event);
+  assert.equal(context.db,original,entry.name);
+  assert.equal(context.db.chats[0].messages[0].text,'keep me',entry.name);
+  assert.equal(context.db.wsp.marker,'existing',entry.name);
+  assert.equal(writes.length,0,entry.name);
+  assert.ok(notices.length>0,entry.name);
+  assert.equal(event.target.value,'',entry.name);
+ }
+});
