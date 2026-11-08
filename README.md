@@ -50,7 +50,7 @@ Kimi-VL、Kimi-Linear、Kimi-K2/K2.5、Kimi-Dev等について、利用者が別
 node tools/kimi_local.mjs --model-dir=/path/to/Kimi-VL-A3B-Instruct --allow-model-code
 ~~~
 
-Kimi-VL-A3B-Instructの配布物は約32.8GBで、対応GPUと十分なメモリが必要です。モデルの入手・ライセンス・外部Pythonコードの安全性の確認は利用者が行います。詳細は[Sol0でKimiを使う](docs/KIMI_LOCAL.md)。実際のQwen/Kimiモデルで応答を返すか確認するには、モデル起動後に[ローカル実接続試験](tools/local_model_smoke.mjs)を実行します。Android APKにはモデルを同梱せず、ネットワーク権限も追加しません。
+Kimi-VL-A3B-Instructの配布物は約32.8GBで、対応GPUと十分なメモリが必要です。モデルの入手・ライセンス・外部Pythonコードの安全性の確認は利用者が行います。詳細は[Sol0でKimiを使う](docs/KIMI_LOCAL.md)。実際のQwen/Kimiモデルで応答を返すか確認するには、モデル起動後に[ローカル実接続試験](tools/local_model_smoke.mjs)を実行します。同じ公開質問による比較は[能力別ローカル評価](tools/compare_model_capabilities.mjs)を使い、コードは自動実行せず、人間の評価を別途記録します。Android APKにはモデルを同梱せず、ネットワーク権限も追加しません。
 
 ## 移行時の重要修正
 
