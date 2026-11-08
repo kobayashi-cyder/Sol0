@@ -79,3 +79,22 @@ scoreReviews(benchmark, reviews) は未評価を成功扱いせず、地域別�
 5. Enter改行、明示送信、長文WSP復元、GIF8秒、オフライン、Androidエミュレータと実機の回帰を維持する。
 
 npm test に追加試験を含む。CI成功は実機動作・政治的中立性の証明ではない。
+
+## 開発者CLI：実際の推論経路
+
+既存のオフラインWSPをNodeから直接使う：
+
+~~~sh
+printf 'こんにちは' | node tools/inference_cli.mjs
+~~~
+
+利用者が別途起動したOpenAI互換のローカル推論サーバーへ明示送信する（任意のQwen互換・その他互換モデル。モデル重みはSol0に含めない）：
+
+~~~sh
+printf 'こんにちは' | node tools/inference_cli.mjs --remote --consent \
+  --endpoint=http://127.0.0.1:1234/v1/chat/completions \
+  --allow-origin=http://127.0.0.1:1234 \
+  --model=my-local-model --source=user-installed --license=user-verified
+~~~
+
+プロンプトはコマンドライン引数にせず標準入力から渡す。外部通信先を指定しただけでは通信は許可されず、オリジン許可と --consent が両方必要。リモートサーバー自体は提供・起動しない。HTTPエンドポイントに認証情報・APIキーを含めない。外部URLに送る場合はHTTPSが必須。端末上の通信同意画面は未実装であり、このCLIの明示フラグをAndroidアプリの同意UIと同一視しない。
