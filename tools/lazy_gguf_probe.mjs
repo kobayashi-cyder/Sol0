@@ -4,13 +4,13 @@
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openChunkModel, indexChunkedGGUF, dotQ8ChunkBlock } from './lazy_gguf.mjs';
+import { openChunkModel, indexChunkedGGUF, dotQ8ChunkBlock, dotQ8TensorRow } from './lazy_gguf.mjs';
 
 export function parseLazyArgs(argv){
   const result=Object.create(null);
   for(const arg of argv){
     const m=/^--([a-z0-9-]+)=(.+)$/.exec(arg);
-    if(!m||!['manifest','expected-sha256','tensor','block'].includes(m[1])
+    if(!m||!['manifest','expected-sha256','tensor','block','row'].includes(m[1])
       ||Object.hasOwn(result,m[1]))throw new Error('Invalid or duplicated lazy GGUF argument');
     result[m[1]]=m[2];
   }
@@ -21,9 +21,13 @@ export function parseLazyArgs(argv){
   }
   const block=result.block===undefined?0:Number(result.block);
   if(!Number.isSafeInteger(block)||block<0)throw new Error('--block must be nonnegative integer');
+  const row=result.row===undefined?null:Number(result.row);
+  if(row!==null&&(!Number.isSafeInteger(row)||row<0||result.block!==undefined)){
+    throw new Error('Use either nonnegative --row=N or --block=N');
+  }
   const tensor=result.tensor??null;
   if(tensor!==null&&(tensor.length>64||!tensor.trim()))throw new Error('Invalid tensor name');
-  return Object.freeze({manifest:result.manifest,expectedSha256:sha,tensor,block});
+  return Object.freeze({manifest:result.manifest,expectedSha256:sha,tensor,block,row});
 }
 
 export async function computeLazyBlock(options){
@@ -32,21 +36,27 @@ export async function computeLazyBlock(options){
     throw new Error('Manifest whole-file SHA256 does not match trusted digest');
   }
   const index=await indexChunkedGGUF(source);
-  const sample=await dotQ8ChunkBlock(source,index,{
-    tensorName:options.tensor,blockIndex:options.block
-  });
+  const sample=options.row===null||options.row===undefined?
+    await dotQ8ChunkBlock(source,index,{
+      tensorName:options.tensor,blockIndex:options.block
+    }):
+    await dotQ8TensorRow(source,index,{
+      tensorName:options.tensor,rowIndex:options.row
+    });
   const stats=source.statistics;
   if(stats.uniqueChunksRead===0||stats.uniqueChunksRead>stats.partCount)throw new Error('Invalid lazy I/O statistics');
   return Object.freeze({
     modelArchitecture:index.architecture,
     tensorCount:index.tensorCount,
     tensorName:sample.tensorName,
-    blockIndex:sample.blockIndex,
+    blockIndex:sample.blockIndex??null,
+    rowIndex:sample.rowIndex??null,
+    rowColumns:sample.rowColumns??null,
     kernel:sample.kernel,
     numericDot:sample.dot,
-    quantScale:sample.scale,
+    quantScale:sample.scale??null,
     sourceOffset:sample.sourceOffset,
-    sampledValues:sample.firstFourWeights,
+    sampledValues:sample.firstFourWeights??null,
     modelFileBytes:source.totalBytes,
     sourceSha256:source.sourceSha256,
     chunksAvailable:stats.partCount,
