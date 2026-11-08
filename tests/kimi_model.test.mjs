@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
-import { inspectSafetensorsFile, inspectLocalKimiModel } from '../tools/kimi_model.mjs';
+import { inspectSafetensorsFile, inspectLocalKimiModel, verifyKimiShardHashes } from '../tools/kimi_model.mjs';
 import {
   parseKimiArgs, buildVllmArgs, offlineVllmEnv, launchLocalKimi, KIMI_ALIAS
 } from '../tools/kimi_local.mjs';
@@ -174,5 +175,37 @@ test('Kimi subprocess is launched without shell, with offline env and explicit m
     assert.equal(called.args[1],dir);
     assert.equal(called.args[called.args.indexOf('--host')+1],'127.0.0.1');
     fakeServer.close();
+  } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('complete Kimi SHA256 manifest is verified byte-for-byte before subprocess startup', async () => {
+  const dir=await fixture('kimi_vl');
+  const name='model-00001.safetensors';
+  const bytes=await readFile(join(dir,name));
+  const digest=createHash('sha256').update(bytes).digest('hex');
+  const manifest=join(dir,'verified-sha256.json');
+  try {
+    const summary=await inspectLocalKimiModel(dir);
+    await writeFile(manifest,JSON.stringify({version:1,files:{[name]:digest}}));
+    assert.equal(await verifyKimiShardHashes(summary,manifest),true);
+    const opts=parseKimiArgs(['--model-dir='+dir,'--sha256-manifest='+manifest]);
+    let spawned=false,served=false;
+    const r=await launchLocalKimi(opts,{
+      serveUI:async()=>{served=true;return {close(){}};},
+      spawnRunner:()=>{spawned=true;return new EventEmitter();}
+    });
+    assert.equal(r.hashesVerified,true);
+    assert.equal(spawned,true);
+    assert.equal(served,true);
+    await writeFile(manifest,JSON.stringify({version:1,files:{[name]:'0'.repeat(64)}}));
+    spawned=false;served=false;
+    await assert.rejects(launchLocalKimi(opts,{
+      serveUI:async()=>{served=true;return {close(){}};},
+      spawnRunner:()=>{spawned=true;return new EventEmitter();}
+    }),/SHA256 mismatch/);
+    assert.equal(spawned,false);
+    assert.equal(served,false);
+    await writeFile(manifest,JSON.stringify({version:1,files:{wrong:'0'.repeat(64)}}));
+    await assert.rejects(verifyKimiShardHashes(summary,manifest),/every shard/);
   } finally {await rm(dir,{recursive:true,force:true});}
 });
