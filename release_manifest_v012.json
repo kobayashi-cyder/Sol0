@@ -1,0 +1,101 @@
+{
+  "release": "v0.12",
+  "as_of": "2026-11-06",
+  "pretrained_weights": false,
+  "network_services": false,
+  "content_type": "procedural generation and limited WSP media control; not a learned diffusion/speech/video generator",
+  "strict_distribution_limit_bytes": 5000000000,
+  "regressions": {
+    "node": "103/103",
+    "python": "13/13",
+    "browser": "PNG/WAV/GIF/WebM + ZIP + /image + WSP UI"
+  },
+  "browser_storage_note": "IndexedDB target-device persistence not independently verified; ZIP export/import tested",
+  "sources": {
+    "SolZero_Chat_Offline.html": {
+      "bytes": 243608,
+      "sha256": "028cd6035125c0fce1b9d8eb9a35883cacbcb7c8f06902798e415931db62612f",
+      "git_blob_sha1": "079db362525a9059839f2dab0a975bb6bd3c4e01"
+    },
+    "chat_web/media_studio.js": {
+      "bytes": 16968,
+      "sha256": "a6f50debdffa91fd2ba774ba3fe1c6810813d1ed0a0625a8949d30ad4ea2cfd4",
+      "git_blob_sha1": "d9f3a525084502926c610aba6f2eb9b04373922f"
+    },
+    "chat_web/media_ui.js": {
+      "bytes": 19437,
+      "sha256": "bc41e5fde6cac01adfce8de81599ae41e0fc0697d71f3c0c80bcef63858ae61a",
+      "git_blob_sha1": "833d7ed808d789f4d9b92a6490d9d15213c6d88b"
+    },
+    "chat_web/app.js": {
+      "bytes": 64286,
+      "sha256": "d4afecd0662f69470c4220216d2236602047483cd315aa6f39c1b182fde7b4a9",
+      "git_blob_sha1": "beb64bc67b7d35448710c65882908b32791a7955"
+    },
+    "chat_web/index.html": {
+      "bytes": 13847,
+      "sha256": "c41971a094d08bb54adea42516b81b134fbd3f5b08e28b7ded53088deb5d5355",
+      "git_blob_sha1": "dd47b6829783f9b7d74a404000466e56a4a8d8c9"
+    },
+    "chat_web/engine.js": {
+      "bytes": 26914,
+      "sha256": "73b33b33b396e42c582eb582eb7d25eab9cbc04b43df3c9d2a1be471e04da7a1",
+      "git_blob_sha1": "5342aa1c0e4632b760eb98d96d854eecf4692730"
+    },
+    "scripts/build_standalone.py": {
+      "bytes": 4474,
+      "sha256": "5b726337b8609e016a0f7c07945560659b70d9622710a52ea9b0b2cde61ae5f6",
+      "git_blob_sha1": "c66fa4e5a473c285f49efd99f6b39b4599718f99"
+    },
+    "tools/webm_to_mp4.py": {
+      "bytes": 1361,
+      "sha256": "a4bfcc81b9551d7c2468ad31ce868c0327cd447cf83ce18af14d507e39cd96c8",
+      "git_blob_sha1": "05201a647a698d7254ed58038c56431e2877c5f1"
+    },
+    "scripts/browser_media_smoke.py": {
+      "bytes": 2449,
+      "sha256": "e7f1cb68b0003cf8ad66326deddd5da8f4c1843399fe03d4e1adc032299b1a9e",
+      "git_blob_sha1": "8abdb328ad8da37b3b54f151781c64524f64132d"
+    },
+    "scripts/audit_media.py": {
+      "bytes": 1482,
+      "sha256": "8eb473b8d4eed3c1752631f657b3a4b686b5873931aedd35852e3a899859bd48",
+      "git_blob_sha1": "caeac361f0d5f6e21ae6488bb10858be43f30783"
+    },
+    "tests/media_studio.test.mjs": {
+      "bytes": 4200,
+      "sha256": "01380e20c308691816bfc3e53f2e3ac4315b9c19a413f5748e83f070360044c8",
+      "git_blob_sha1": "d4fdc896428c432ff60f66bb4d3d533f0b982ba5"
+    },
+    "samples/image.png": {
+      "bytes": 28005,
+      "sha256": "406f10c4c98f2d2dae4af83f4eb054ea1f8135d146e3ee874d153f5bea65198b",
+      "git_blob_sha1": "82595f2746b6462f30f00a91f7e889dca00a4337"
+    },
+    "samples/audio.wav": {
+      "bytes": 64044,
+      "sha256": "ece11468a25a6d5505d21077fb29caec851f9fb9e43f8439a24634a6aef55749",
+      "git_blob_sha1": "2792525b45dc3df11318c38e82fd2ffd856f89c4"
+    },
+    "samples/animation.gif": {
+      "bytes": 69515,
+      "sha256": "1329f816bd77f60ecb98f97429b4be94c48e6855a4c0dd0c15723c44941bd4a6",
+      "git_blob_sha1": "2e2ec78fa7b69886dd845d8ffe821659cc4a3193"
+    },
+    "samples/movie.webm": {
+      "bytes": 42390,
+      "sha256": "d183ecf022886e8f2695fa04e4e7ec5b1cf441c8b83ab21588789980cfc1f51a",
+      "git_blob_sha1": "83bcc04b1b08ddc3272b6d056bc9dedf6d1d09db"
+    },
+    "samples/movie.mp4": {
+      "bytes": 64143,
+      "sha256": "2c36928bfa9e666c6615d74425b577984573da474a5c0de1b1f751f52e662c89",
+      "git_blob_sha1": "adde1ad9e05200de6573e5cb696cb9126ccab758"
+    },
+    "samples/project.zip": {
+      "bytes": 207037,
+      "sha256": "87ae2f9d3cdfa36e46f13ba84c06cc3a1c8fa2308db278c53fc85197bf2c7822",
+      "git_blob_sha1": "af792beabb7bec9760fd22894e42fc183643a031"
+    }
+  }
+}
