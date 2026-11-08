@@ -1,0 +1,21 @@
+# Build caches
+__pycache__/
+.pytest_cache/
+*.pyc
+node_modules/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+.gradle/
+# Never commit signing material or secrets
+*.jks
+*.keystore
+*.p12
+*.pem
+.env
+.env.*
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
