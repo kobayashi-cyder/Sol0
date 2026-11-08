@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { splitModelBytes } from '../tools/model_chunks.mjs';
 import {
-  openChunkModel, indexChunkedGGUF, dotQ8ChunkBlock, decodeF16
+  openChunkModel, indexChunkedGGUF, dotQ8ChunkBlock, dotQ8TensorRow, decodeF16
 } from '../tools/lazy_gguf.mjs';
 
 const u32=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n);return b;};
@@ -147,4 +147,21 @@ test('actual unmodified GGUF bytes have the same quantized dot product as chunke
     assert.equal(result.dot,reference);
     assert.equal(result.dot,120);
   });
+});
+
+test('full Q8_0 row primitive reads the weight row without any whole-GGUF reconstruction',async()=>{
+  await withModel(async({parts,fixture})=>{
+    const source=await openChunkModel(join(parts,'manifest.json'));
+    const index=await indexChunkedGGUF(source);
+    const row=await dotQ8TensorRow(source,index,{
+      tensorName:fixture.tensorName,rowIndex:0
+    });
+    const block=await dotQ8ChunkBlock(source,index,{tensorName:fixture.tensorName});
+    assert.equal(row.dot,block.dot);
+    assert.equal(row.rowColumns,32);
+    assert.equal(row.rows,1);
+    assert.equal(row.modelBytesRebuilt,0);
+    await assert.rejects(dotQ8TensorRow(source,index,{rowIndex:1}),/dimensions or index/);
+    await assert.rejects(dotQ8TensorRow(source,index,{rowIndex:0,vector:[2]}),/matching row/);
+  },makeQwenGGUF({crossBoundary:true}));
 });
