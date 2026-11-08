@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'jp.solzero.offline'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'jp.solzero.offline'
+        minSdk 29
+        targetSdk 35
+        versionCode 16
+        versionName '0.16-lab'
+    }
+
+    buildFeatures { buildConfig true }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs += ["$buildDir/generated/assets/main"]
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.register('syncOfflineAssets', Copy) {
+    from(file('../../SolZero_Chat_Offline.html')) {
+        rename { 'index.html' }
+    }
+    into(layout.buildDirectory.dir('generated/assets/main'))
+}
+
+tasks.named('preBuild') {
+    dependsOn(tasks.named('syncOfflineAssets'))
+}
