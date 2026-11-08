@@ -32,6 +32,16 @@
 
 動作には利用者側のOpenAI互換LLMサーバーとブラウザCORS設定が必要です。詳しくは[推論接続と監査](docs/MODEL_INFERENCE.md)をご覧ください。
 
+## Qwenの学習済みGGUFファイルをSol0で利用（LM Studio不要）
+
+任意のQwen GGUFをユーザーが用意した場合、Node.jsと独立にインストールしたllama.cppのllama-serverを使用し、Sol0チャットへローカル接続する開発者向け起動ツールを追加しました。モデルのバイト列を検査してからローカルサーバーを起動します。**Sol0が独自にTransformer推論を実装したものではなく、モデル自体はダウンロード・同梱しません。**
+
+~~~sh
+node tools/qwen_local.mjs --model=/path/to/Qwen3-0.6B-Q4_K_M.gguf
+~~~
+
+ブラウザ版の接続先設定と、必要な実行バイナリ・ライセンス・テスト範囲は[Qwen GGUFローカル実行](docs/QWEN_GGUF.md)をご覧ください。Android APKでは本経路は利用できず、既存のWSPオフライン動作を維持します。
+
 ## 移行時の重要修正
 
 - Enterは改行、Ctrl+Enter / Cmd+Enterと送信ボタンが送信。日本語IME変換中は誤送信しない。
