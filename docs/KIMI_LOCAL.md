@@ -53,6 +53,30 @@ vLLMの実行ファイルがPATHになければ --runner=/path/to/vllm、複数G
 
 **重要**：Kimi-VL公式のvLLM実行例も --trust-remote-code を使用する。本ツールはそのフラグを暗黙で付けず、--allow-model-code が明示された場合のみ渡す。trusted codeの取り扱いと依存バージョンは自分で監査する。
 
+## 必要に応じたモデル全シャードSHA256照合
+
+配布元の正しいリビジョンで公表された**各safetensorsシャードのSHA256**を確認し、ローカルのmanifestを作れます。ファイル名はダウンロードした実ファイルと一致させてください。
+
+~~~json
+{
+  "version": 1,
+  "files": {
+    "model-00001-of-00007.safetensors": "ここに配布元で確認したSHA256を64桁の小文字16進数で記載"
+  }
+}
+~~~
+
+この例は説明用です。実際に起動するときは**全シャードを漏れなく記載**してください。モデルを改変・欠損させた場合やハッシュが一致しない場合は推論サーバーを起動しません。ハッシュ計算はモデル全ファイルをストリームで読むため、時間がかかります。
+
+~~~sh
+node tools/kimi_local.mjs \
+  --model-dir=/path/to/Kimi-VL-A3B-Instruct \
+  --allow-model-code \
+  --sha256-manifest=/path/to/verified-shards.json
+~~~
+
+照合できるのは**ローカルバイト列と自分で用意したmanifestの一致**であり、そのmanifestの由来・署名、モデルの安全性、ライセンスや偏向を自動保証しません。
+
 ## Sol0への接続
 
 | 項目 | 設定値 |
@@ -104,7 +128,7 @@ caseIdは evaluations/local_capability_cases.json に定義（ja_instruction、a
 
 ## セキュリティ・未達
 
-- ヘッダー検査はバイト列構造を検査するだけで、重みやコードの出典・真正性・安全性を検証しない。**ダウンロードした配布物全体のSHA256や電子署名の検証は、別途入手した信頼できる情報と照合する必要がある**。
+- ヘッダー検査だけでは重み・コードの出典や安全性を検証しない。任意の --sha256-manifest を指定すると全シャードのSHA256をストリーム検証できるが、**manifest自体の入手元・署名とライセンスは別途確認が必要**。
 - モデルshardはディスク上にあることとサポートされるdtype/offsetを確認するが、全テンソルの数値内容、対応GPU、vLLM互換性、ライセンス、著作権は保証しない。
 - vLLM起動時にHF_HUB_OFFLINE/TRANSFORMERS_OFFLINE/HF_DATASETS_OFFLINEを設定してモデルの自動ダウンロードを抑制。モデルを渡すのはローカルディレクトリのみ。利用者自身がインストールしたvLLMやサードパーティモデルコードの挙動をネットワークレベルでサンドボックスするものではない。
 - vLLMのHTTPサービスは127.0.0.1限定、CORSはSol0オリジンのみ。ポートが衝突したら --port と --ui-port を変更する。UI配信はSol0単体HTMLのみに限定。
