@@ -30,7 +30,7 @@ def main():
     old={'schema':3,'chats':[{'id':'carry','title':'以前の会話','created':'2026-11-06T00:00:00Z','messages':[{'role':'user','text':'旧データは残ります','at':'2026-11-06T00:00:00Z'}]}], 'current':'carry','knowledge':[],'documents':[],'theme':'light'}
     page.evaluate('x=>localStorage.setItem("solzero_chat_v010_local",JSON.stringify(x))',old)
     page.set_content(HTML,wait_until='load')
-    assert 'Sol-Zero' in page.title()
+    assert 'Sol0' in page.title()
     expect(page.get_by_text('旧データは残ります')).to_have_count(1,timeout=12000)
     page.get_by_role('button',name='帰納WSP',exact=True).click()
     page.get_by_role('button',name='① 候補回路を合成して独立検証').click()
