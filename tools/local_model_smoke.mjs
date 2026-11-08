@@ -40,7 +40,7 @@ export function parseSmokeArgs(argv) {
   return { endpoint:url.toString(), model:options.model, origin:url.origin };
 }
 
-export async function runLocalProbe(options, fetchImpl = globalThis.fetch) {
+export async function runLocalProbe(options, fetchImpl = globalThis.fetch, prompt = PROBE_PROMPT) {
   const remote = createHTTPChatProvider({
     endpoint:options.endpoint,
     modelRecord:{
@@ -56,7 +56,7 @@ export async function runLocalProbe(options, fetchImpl = globalThis.fetch) {
     remoteProvider:remote
   });
   const started=Date.now();
-  const result=await router.generate(PROBE_PROMPT,{route:'remote',consent:true});
+  const result=await router.generate(prompt,{route:'remote',consent:true});
   if (typeof result.text!=='string' || !result.text.trim()) throw new Error('Model reply was empty');
   return Object.freeze({
     model:options.model,
