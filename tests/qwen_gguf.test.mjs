@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
+import { request } from 'node:http';
 import { createHash } from 'node:crypto';
 import { parseGGUFMetadata, inspectGGUF, sha256File } from '../tools/gguf_inspect.mjs';
 import {
@@ -120,8 +121,15 @@ test('local UI serves only the bundled Sol0 HTML, not model bytes or repository 
     assert.equal((await fetch(root + '/')).status, 200);
     assert.equal((await fetch(root + '/tools/gguf_inspect.mjs')).status, 404);
     assert.equal((await fetch(root + '/../../.git/config')).status, 404);
-    const denied = await fetch(root + '/SolZero_Chat_Offline.html', {headers:{Host:'evil.example'}});
-    assert.equal(denied.status,403);
+    const denied = await new Promise((resolve,reject)=>{
+      const req=request({
+        hostname:'127.0.0.1',port,path:'/SolZero_Chat_Offline.html',
+        method:'GET',headers:{Host:'evil.example'}
+      },res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});
+      req.on('error',reject);
+      req.end();
+    });
+    assert.equal(denied,403);
     assert.equal((await fetch(root, {method:'POST'})).status,405);
   } finally {
     await new Promise(resolve=>server.close(resolve));
