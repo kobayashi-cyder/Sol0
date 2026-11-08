@@ -288,3 +288,47 @@ export async function dotQ8ChunkBlock(source,index,{
     kernel:'Q8_0 32-weight dot product'
   });
 }
+
+
+/**
+ * On-demand full ROW matvec primitive: read only the Q8_0 blocks in one row.
+ * This can represent a real linear-layer neuron in Qwen, but still omits the
+ * embedding/normalization/attention/activation/KV/tokenizer pipeline.
+ */
+export async function dotQ8TensorRow(source,index,{
+  tensorName=null,rowIndex=0,vector=null
+}={}){
+  const chosen=tensorName===null?
+    [...index.tensors.values()].find(t=>t.type===8&&t.shape[0]%32===0):
+    index.tensors.get(tensorName);
+  if(!chosen||chosen.type!==8||chosen.shape[0]%32!==0){
+    throw new Error('Requested row tensor is not GGML Q8_0');
+  }
+  const columns=chosen.shape[0],rows=chosen.elements/columns;
+  if(columns<32||columns>32768||!Number.isSafeInteger(rows)||
+    !Number.isSafeInteger(rowIndex)||rowIndex<0||rowIndex>=rows){
+    throw new Error('Q8 row dimensions or index exceed supported bounds');
+  }
+  const values=vector??Array(columns).fill(1);
+  if(!Array.isArray(values)||values.length!==columns||
+    !values.every(v=>typeof v==='number'&&Number.isFinite(v))){
+    throw new Error('Q8 row vector must contain finite values matching row columns');
+  }
+  const bytesPerRow=(columns/32)*34;
+  const offset=index.dataStart+chosen.offset+rowIndex*bytesPerRow;
+  const weights=await source.readRange(offset,bytesPerRow);
+  let dot=0;
+  for(let block=0;block<columns/32;block++){
+    const base=block*34;
+    const scale=decodeF16(weights.readUInt16LE(base));
+    for(let j=0;j<32;j++){
+      dot+=scale*weights.readInt8(base+2+j)*values[block*32+j];
+    }
+  }
+  if(!Number.isFinite(dot))throw new Error('Nonfinite Q8 row dot');
+  return Object.freeze({
+    tensorName:chosen.name,rowIndex,rowColumns:columns,
+    rows,sourceOffset:offset,dot,
+    modelBytesRebuilt:0,kernel:'Q8_0 full-row matvec primitive'
+  });
+}
