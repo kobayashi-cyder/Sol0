@@ -19,3 +19,8 @@ android/local.properties
 .DS_Store
 .idea/
 .vscode/
+
+# Model weights are user-supplied; never commit large pretrained tensors
+*.gguf
+*.safetensors
+*.bin
