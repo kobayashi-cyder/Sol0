@@ -193,7 +193,7 @@ async function send(event){
   if(byId('inferenceMode').value==='remote'&&!/^\//.test(text)){
     if(!remoteConnection){notify('LLM未設定のため送信しません。');openPanel('model');return;}
     const connection=remoteConnection;
-    if(!confirm('入力文を外部LLMへ送信します。\\n送信先：'+connection.origin+'\\nモデル：'+connection.modelId+'\\n送信する内容：現在の入力文のみ（履歴・資料は送信しません）\\n続けますか？'))return;
+    if(!confirm('入力文を外部LLMへ送信します。\n送信先：'+connection.origin+'\nモデル：'+connection.modelId+'\n送信する内容：現在の入力文のみ（履歴・資料は送信しません）\n続けますか？'))return;
     remoteSending=true;byId('send').disabled=true;$input.disabled=true;
     try{
       const router=new InferenceRouter({
@@ -201,7 +201,7 @@ async function send(event){
         remoteProvider:connection.provider
       });
       const result=await router.generate(text,{route:'remote',consent:true});
-      commitChatAnswer(c,text,'［外部LLM：'+connection.modelId+'］\\n'+result.text);
+      commitChatAnswer(c,text,'［外部LLM：'+connection.modelId+'］\n'+result.text);
     }catch(err){
       notify('LLM要求に失敗。入力は保持しました。接続先・CORS・サーバー稼働状況を確認してください。');
     }finally{
