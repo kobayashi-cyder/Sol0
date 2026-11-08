@@ -59,8 +59,8 @@ test('lossless verified range across chunk boundary without reconstructed GGUF f
   await withModel(async({dir,parts,fixture})=>{
     const manifest=join(parts,'manifest.json');
     const s=await openChunkModel(manifest);
-    const a=await s.readRange(980,64);
-    assert.deepEqual(a,fixture.bytes.subarray(980,1044));
+    const a=await s.readRange(990,36);
+    assert.deepEqual(a,fixture.bytes.subarray(990,1026));
     assert.equal(s.totalBytes,fixture.bytes.length);
     assert.equal(s.statistics.diskReassembly,false);
     assert.equal(s.statistics.uniqueChunksRead,2);
@@ -95,8 +95,10 @@ test('lazy tensor reader rejects tampered bytes before any Q8 kernel executes',a
     const data=await readFile(path);data[0]^=0xff;
     await writeFile(path,data);
     const store=await openChunkModel(join(parts,'manifest.json'));
-    const index=await indexChunkedGGUF(store);
-    await assert.rejects(dotQ8ChunkBlock(store,index,{}),/SHA256 mismatch/);
+    await assert.rejects((async()=>{
+      const index=await indexChunkedGGUF(store);
+      await dotQ8ChunkBlock(store,index,{});
+    })(),/SHA256 mismatch/);
   },makeQwenGGUF({crossBoundary:true}));
 });
 
