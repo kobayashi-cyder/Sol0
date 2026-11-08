@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#153e56"><title>Sol0 | Chat v0.16</title>
+<style>
+:root{color-scheme:light;--bg:#f4f8fa;--surface:#fff;--side:#12374d;--side-ink:#e3f1f6;--ink:#152f3e;--sub:#587180;--line:#d5e2e8;--accent:#126e82;--accent-2:#e2f4f6;--user:#dbedf3;--shadow:0 16px 45px #16344324;font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+:root[data-theme=dark]{color-scheme:dark;--bg:#101e28;--surface:#192c38;--side:#0d1b25;--side-ink:#dbe8ef;--ink:#e6f2f6;--sub:#a4bcc7;--line:#35505e;--accent:#58c3d2;--accent-2:#194350;--user:#1f4c5a;--shadow:0 16px 45px #0007}
+*{box-sizing:border-box}html,body{height:100%;margin:0}body{height:100dvh;background:var(--bg);color:var(--ink);overflow:hidden}button,input,textarea,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}.hidden{display:none!important}
+#app{display:grid;grid-template-columns:270px minmax(0,1fr);height:100%;max-height:100dvh}
+.sidebar{background:var(--side);color:var(--side-ink);display:flex;flex-direction:column;min-height:0;padding:16px 13px;gap:11px}
+.brand{display:flex;gap:11px;align-items:center;padding:4px 4px 13px;border-bottom:1px solid #ffffff26}.logo{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#2d99b0;color:#fff;font-weight:850;font-size:18px}.brand strong{font-size:18px}.brand small{display:block;font-size:11px;opacity:.78;margin-top:2px}
+.side-btn{width:100%;text-align:left;color:var(--side-ink);background:transparent;border:1px solid #ffffff36;border-radius:10px;padding:10px 11px;font-size:13px}.side-btn:hover{background:#ffffff18}.side-actions{display:grid;gap:7px}.searchbox{width:100%;background:#ffffff13;color:#fff;border:1px solid #ffffff38;border-radius:9px;outline:none;padding:10px 11px;font-size:13px}.searchbox::placeholder{color:#c2d5dd}.searchbox:focus{border-color:#8ed9e5}
+.section-caption{font-size:11px;letter-spacing:.04em;margin:2px 3px;color:#b4ccd8}.history{min-height:0;flex:1;overflow:auto;display:flex;flex-direction:column;gap:4px}.chat-nav{text-align:left;color:var(--side-ink);border:1px solid transparent;background:transparent;border-radius:9px;padding:10px 11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}.chat-nav[aria-current="true"]{background:#ffffff24;border-color:#ffffff32}.chat-nav:hover{background:#ffffff1b}.chat-nav small{display:block;opacity:.65;font-size:10px;margin-top:3px}.side-footer{display:grid;gap:7px;padding-top:10px;border-top:1px solid #ffffff2a}.side-footer .row2{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}.topbar{background:var(--surface);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;min-height:72px;gap:10px;padding:12px 19px}.topbar h1{font-size:17px;margin:0 0 4px}.topbar p{font-size:11px;color:var(--sub);margin:0}.head-actions{display:flex;gap:7px;align-items:center}.top-btn{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 10px;color:var(--ink);white-space:nowrap;font-size:13px}.top-btn:hover{background:var(--accent-2)}.status{color:var(--accent);border:1px solid var(--line);background:var(--accent-2);font-weight:700;font-size:11px;border-radius:50px;padding:7px 10px;white-space:nowrap}
+.messages{flex:1;overflow-y:auto;overscroll-behavior:contain;min-height:0;padding:23px max(22px,calc((100% - 850px)/2));scroll-behavior:smooth}.message{display:flex;gap:10px;align-items:flex-start;margin:19px 0}.message.user{justify-content:flex-end}.avatar{display:grid;place-items:center;border-radius:10px;background:var(--accent-2);color:var(--accent);height:34px;width:34px;flex:0 0 34px;font-weight:800;font-size:13px}.content{max-width:min(720px,87%);min-width:0}.bubble{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.8;padding:12px 15px;background:var(--surface);border:1px solid var(--line);border-radius:4px 15px 15px 15px;box-shadow:0 2px 8px #102d3810}.message.user .bubble{background:var(--user);border-radius:15px 4px 15px 15px}.meta{display:flex;align-items:center;gap:9px;color:var(--sub);font-size:10px;margin:5px 2px}.message.user .meta{justify-content:flex-end}.copy-btn{color:var(--accent);border:0;background:none;padding:1px 4px;font-size:11px}
+.welcome{text-align:center;max-width:590px;margin:8vh auto 35px}.welcome-logo{width:69px;height:69px;border-radius:22px;background:var(--accent-2);color:var(--accent);font-size:25px;font-weight:900;display:grid;place-items:center;margin:0 auto 15px}.welcome h2{font-size:24px;margin:0 0 12px}.welcome p{font-size:14px;line-height:1.9;color:var(--sub);margin:0 auto 21px}.examples{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}.example{border:1px solid var(--line);color:var(--ink);background:var(--surface);border-radius:24px;padding:9px 12px;font-size:12px}
+.composer-wrap{background:var(--surface);border-top:1px solid var(--line);padding:10px max(15px,calc((100% - 850px)/2)) max(12px,env(safe-area-inset-bottom))}.composer{display:flex;align-items:flex-end;background:var(--surface);gap:7px;border:1px solid #99b6c3;border-radius:14px;padding:7px}.composer:focus-within{outline:2px solid #8ac9d6;outline-offset:1px}.composer textarea{flex:1;min-width:0;min-height:43px;max-height:145px;resize:none;border:0;outline:0;background:transparent;color:var(--ink);font-size:15px;padding:9px 8px;line-height:1.5}.send{background:#16536b;border:0;color:#fff;min-height:43px;min-width:53px;border-radius:10px;font-size:13px;font-weight:700}.disclaimer{color:var(--sub);font-size:10.5px;text-align:center;margin-top:7px;line-height:1.5}
+.scrim{position:fixed;inset:0;background:#0618239e;z-index:50}.panel{position:fixed;z-index:51;top:5%;left:50%;transform:translateX(-50%);max-height:90%;overflow:hidden;width:min(720px,calc(100vw - 26px));border:1px solid var(--line);background:var(--surface);border-radius:18px;box-shadow:var(--shadow);display:flex;flex-direction:column}.panel-head{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px}.panel-head h2{font-size:18px;margin:0}.panel-body{padding:16px 19px;overflow:auto;flex:1;min-height:0}.panel-foot{padding:12px 19px;border-top:1px solid var(--line);font-size:11px;color:var(--sub)}
+.field{margin-bottom:13px}.field label{display:block;color:var(--sub);font-size:12px;font-weight:700;margin-bottom:5px}.field input,.field textarea,.field select{width:100%;border:1px solid var(--line);border-radius:9px;color:var(--ink);background:var(--bg);padding:10px 11px;outline-color:var(--accent)}.field textarea{min-height:91px;resize:vertical}.buttons{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.btn{background:var(--accent-2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:12px}.btn.primary{background:#15546d;border-color:#15546d;color:white}.btn.danger{background:#fff0ee;color:#983f2e;border-color:#efb8ae}.muted{color:var(--sub);font-size:12px;line-height:1.7}.listentry{border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg);overflow-wrap:anywhere}.listentry .entry-main{font-weight:700;font-size:13px;white-space:pre-wrap}.listentry .entry-answer{font-size:12px;white-space:pre-wrap;line-height:1.6;color:var(--sub);margin:7px 0 10px;max-height:110px;overflow:auto}.flex{display:flex;align-items:center;justify-content:space-between;gap:10px}.small-caption{font-size:11px;color:var(--sub)}.mobile-only{display:none}
+.toast{position:fixed;bottom:105px;left:50%;transform:translateX(-50%);max-width:90vw;z-index:100;background:#133d52;color:white;border-radius:9px;padding:10px 13px;font-size:12px;box-shadow:var(--shadow)}
+@media(max-width:840px){.status{display:none}.topbar{padding:10px 12px}.top-btn{font-size:12px;padding:8px 9px}.topbar p{max-width:260px;line-height:1.4}}
+@media(max-width:700px){.head-actions .top-btn{padding:8px 7px;font-size:11px}.topbar h1{font-size:15px}#app{grid-template-columns:1fr}.sidebar{display:none}.sidebar.open{display:flex;position:fixed;z-index:40;inset:0 auto 0 0;width:min(82vw,315px);box-shadow:0 0 0 100vmax #071f3180}.mobile-only{display:inline-flex}.desktop-optional{display:none}.topbar{min-height:66px}.topbar h1{font-size:16px}.topbar p{font-size:10px;max-width:225px}.head-actions{gap:5px}.messages{padding:16px 11px}.message{margin:15px 0}.content{max-width:86%}.bubble{font-size:13px;line-height:1.8;padding:11px 13px}.welcome{margin:6vh auto}.welcome h2{font-size:22px}.welcome p{font-size:13px}.composer-wrap{padding:8px 8px max(10px,env(safe-area-inset-bottom))}.panel{top:3%;max-height:94%;width:calc(100vw - 18px);border-radius:14px}.panel-body{padding:13px}.panel-head{padding:12px 14px}.panel-foot{padding:10px 14px}.disclaimer{font-size:9px}}
+
+@media(max-width:700px){
+  .topbar{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:10px 12px;min-height:auto}
+  .topbar>div:first-child{display:flex;align-items:baseline;gap:10px;min-width:0}
+  .topbar h1{font-size:16px;white-space:nowrap;flex:0 0 auto}
+  .topbar p{white-space:nowrap;max-width:none;overflow:hidden;text-overflow:ellipsis}
+  .head-actions{display:flex;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;width:100%;max-width:100%;gap:6px;padding-bottom:3px;scrollbar-width:thin}
+  .head-actions .top-btn{flex:0 0 auto;white-space:nowrap}
+}
+.media-preview{display:block;max-width:100%;height:auto;object-fit:contain}.media-actions{display:flex;flex-wrap:wrap;gap:8px}
+/* Coarse pointers require reliable touch targets; retain keyboard focus visibility. */
+@media (pointer:coarse){.top-btn,.btn,.side-btn,.chat-nav,.example{min-height:44px}.send{min-height:48px;min-width:56px}}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style></head><body>
+<div id="app">
+<aside id="sidebar" class="sidebar" aria-label="会話一覧">
+  <div class="brand"><div class="logo">S0</div><div><strong>Sol-Zero</strong><small>from scratch · Chat v0.15</small></div></div>
+  <button id="newSidebar" class="side-btn">＋ 新しい会話</button>
+  <input id="historySearch" class="searchbox" type="search" placeholder="会話とメッセージを検索" aria-label="会話履歴を検索">
+  <div class="section-caption">会話履歴 <span id="chatCount"></span></div>
+  <nav class="history" id="history" aria-label="チャット履歴"></nav>
+  <div class="side-footer">
+    <button id="factorySide" class="side-btn">🧰 WSP回路工房</button><button id="graphSide" class="side-btn">🧠 WSP汎用グラフ</button><button id="induceSide" class="side-btn">🔬 帰納WSP・規則を発見</button><button id="autoSide" class="side-btn">✦ WSP回路を自動設計</button><button id="bulkSide" class="side-btn">⚙ WSP大量回路</button>
+    <button id="studioSide" class="side-btn">🎬 メディア工房・作品管理</button>
+    <button id="agentSide" class="side-btn">🧩 タスク工房・複数工程</button>
+    <button id="pinChat" class="side-btn">📌 会話を固定</button>
+    <div class="side-actions"><button id="rename" class="side-btn">✎ 会話の名前を変更</button><button id="exportJson" class="side-btn">↓ JSONバックアップ</button><button id="exportMd" class="side-btn">↓ Markdown書き出し</button><button id="importJson" class="side-btn">↑ JSONから復元</button></div>
+    <div class="row2"><button id="deleteChat" class="side-btn">現在の会話を削除</button><button id="themeSide" class="side-btn">◐ 配色</button></div>
+  </div>
+</aside>
+<main class="main">
+<header class="topbar"><div><h1>Sol-Zero Chat</h1><p>学習済みモデルなし・端末内で実行</p></div><div class="head-actions">
+  <span class="status">ローカル v0.15</span>
+  <button class="top-btn mobile-only" id="menu" title="会話履歴" aria-label="会話履歴">☰</button>
+  <button class="top-btn" id="agentBtn">🧩 タスク工房</button><button class="top-btn" id="studioBtn">🎨 メディア工房</button><button class="top-btn" id="knowledgeBtn">知識</button><button class="top-btn" id="docsBtn">資料</button><button class="top-btn" id="generatorBtn">生成実験</button><button class="top-btn" id="factoryBtn">回路工房</button><button class="top-btn" id="graphBtn">汎用WSP</button><button class="top-btn" id="induceBtn">帰納WSP</button><button class="top-btn" id="autoBtn">自動設計</button><button class="top-btn desktop-optional" id="bulkBtn">WSP拡張</button><button class="top-btn desktop-optional" id="circuitBtn">回路</button>
+  <button class="top-btn" id="newTop" title="新しい会話" aria-label="新しい会話">＋</button>
+</div></header>
+<section id="messages" class="messages" role="log" aria-label="チャットメッセージ"></section>
+<footer class="composer-wrap"><form id="chatForm" class="composer"><textarea id="input" rows="1" maxlength="3000" placeholder="チャット、/agent help、/image 海、/code python fibonacci など…" aria-label="メッセージを入力"></textarea><button id="send" class="send" type="submit">送信</button></form><div class="disclaimer">Enter：改行 ／ Ctrl+Enter・⌘+Enter：送信 ／ Android：送信ボタン</div><div class="disclaimer">ルール・WSP・スクラッチ分類器と手続き的メディア生成に対応。高度な汎用生成AIではありません。</div></footer>
+</main></div>
+<div id="scrim" class="scrim hidden"></div>
+<section id="panel" class="panel hidden" role="dialog" aria-modal="true" aria-labelledby="panelTitle"><header class="panel-head"><h2 id="panelTitle">設定</h2><button id="closePanel" class="top-btn" aria-label="閉じる">× 閉じる</button></header><div id="panelBody" class="panel-body"></div><footer id="panelFoot" class="panel-foot">すべて端末内で処理します。</footer></section>
+<input id="jsonPicker" type="file" accept=".json,application/json" class="hidden">
+<input id="docPicker" type="file" accept=".txt,.md,text/plain,text/markdown" multiple class="hidden">
+<div id="toast" class="toast hidden" role="status"></div>
+<script type="module" src="./app.js"></script>
+</body></html>
