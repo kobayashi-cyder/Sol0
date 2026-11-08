@@ -92,7 +92,7 @@ test('Q8_0 tensor index and 32-value dot product read directly from chunked Qwen
 test('lazy tensor reader rejects tampered bytes before any Q8 kernel executes',async()=>{
   await withModel(async({parts})=>{
     const path=join(parts,'part-000001.bin');
-    const data=await readFile(path);data[5]^=0xff;
+    const data=await readFile(path);data[0]^=0xff;
     await writeFile(path,data);
     const store=await openChunkModel(join(parts,'manifest.json'));
     const index=await indexChunkedGGUF(store);
