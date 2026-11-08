@@ -5,6 +5,8 @@
  */
 import { open, readdir, stat, lstat, readFile } from 'node:fs/promises';
 import { join, resolve, basename } from 'node:path';
+import { timingSafeEqual } from 'node:crypto';
+import { sha256File } from './gguf_inspect.mjs';
 
 export const KIMI_LIMITS = Object.freeze({
   configBytes: 256 * 1024,
@@ -154,6 +156,44 @@ export async function inspectLocalKimiModel(directory, { family = 'auto' } = {})
     architecture: config.architectures?.[0] ?? null,
     requiresCustomCode: !!(config.auto_map && Object.keys(config.auto_map).length),
     shards: names.length, headersChecked: verifiedHeaders,
-    modelBytes, weightsAuthenticated: false
+    modelBytes, shardNames:Object.freeze(names), weightsAuthenticated: false
   });
+}
+
+/**
+ * Check every shard against a caller-supplied manifest of publisher hashes.
+ * A matching hash proves byte equality to the stated manifest, not that the
+ * manifest's author or checkpoint is safe or genuine.
+ */
+export async function verifyKimiShardHashes(summary, manifestPath) {
+  if (!summary || !Array.isArray(summary.shardNames) || !summary.modelDir) {
+    throw new Error('Inspected Kimi model summary required');
+  }
+  if (typeof manifestPath !== 'string' || !manifestPath.trim()) {
+    throw new Error('An explicit SHA256 manifest path is required');
+  }
+  const manifest = jsonObject(
+    await readSmall(resolve(manifestPath), KIMI_LIMITS.indexBytes, 'Kimi SHA256 manifest'),
+    'Kimi SHA256 manifest'
+  );
+  if (manifest.version !== 1 || !manifest.files || typeof manifest.files !== 'object'
+    || Array.isArray(manifest.files)) {
+    throw new Error('Invalid Kimi hash manifest schema');
+  }
+  const names=Object.keys(manifest.files);
+  if (names.length!==summary.shardNames.length ||
+    names.some(name=>!summary.shardNames.includes(name))) {
+    throw new Error('Kimi SHA256 manifest must include every shard exactly once');
+  }
+  for (const name of summary.shardNames) {
+    const expected=manifest.files[name];
+    if (typeof expected!=='string' || !/^[0-9a-f]{64}$/.test(expected)) {
+      throw new Error('Invalid Kimi SHA256 entry');
+    }
+    const actual=await sha256File(join(summary.modelDir,name));
+    if (!timingSafeEqual(Buffer.from(actual,'hex'),Buffer.from(expected,'hex'))) {
+      throw new Error('Kimi SHA256 mismatch; refusing to launch model');
+    }
+  }
+  return true;
 }
