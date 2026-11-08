@@ -1,4 +1,5 @@
 import {SolZeroEngine,ENGINE_VERSION,INTENTS,saveLesson,normalized,calculate} from './engine.js';
+import {InferenceRouter,createWSPProvider,createHTTPChatProvider,createNetworkPolicy} from './inference_gateway.js';
 import {generateCode} from './code_workshop.js';
 import {runTaskPlan,runTaskPlanAsync,validateTaskPlan,TASK_AGENT_DEMO,TASK_AGENT_TOOLS,taskAgentHelp} from './task_agent.js';
 import {ScratchBigram} from './bigram.js';
@@ -13,6 +14,8 @@ import {FACTORY_FAMILIES,FACTORY_LIMITS,buildFactory,verifyFactory,auditFactory,
 const engine=new SolZeroEngine();
 const generator=new ScratchBigram();
 const studio=new MediaStudio();
+let remoteConnection=null;
+let remoteSending=false;
 engine.bulk=new WSPBulk();
 engine.flow=new WSPFlow();
 engine.graph=new WSPGraph();
@@ -129,10 +132,83 @@ function draw(){drawHistory();drawMessages();$input.value=current().draft||'';re
 function resize(){$input.style.height='auto';$input.style.height=Math.min(145,$input.scrollHeight)+'px';}
 function taskAdapter(allowMediaWrites=false){return {documents:db.documents,graph:engine.graph,neural:engine.neural,cognition:engine.cognition,calculate,generateCode,generateWSPCode,allowMediaWrites,generateMedia:async(kind,opts)=>{await studio.ensureLoaded();return studio.generate(kind,opts);}};}
 function taskResultText(r){return (r.ok?'完了':'停止')+'：'+r.trace.length+'工程実行'+(r.ok?'':`。失敗工程：${r.failedAt}（${r.error}）`)+'\n'+JSON.stringify(r.ok?r.output:r.trace,null,2).slice(0,9000)+'\n※計画の実行記録です。自由なAI推論の証明ではありません。';}
+
+function updateModelStatus(){
+  byId('modelStatus').textContent=remoteConnection?'LLM設定済（通信未検証）':'LLM未設定・通信なし';
+  if(!remoteConnection&&byId('inferenceMode').value==='remote')byId('inferenceMode').value='local';
+}
+function renderModelSettings(){
+  panelIntro('外部LLM接続（実験機能）','既定はWSP。外部LLMへの送信には毎回確認が必要です。設定はページ再読込で消えます。');
+  const root=byId('panelBody');root.replaceChildren();
+  root.append(el('p',{class:'muted',text:'外部LLMは利用者が別途起動・管理するOpenAI互換サーバーです。Sol0にはモデルの重みもAPIキーもありません。外部送信は現在の入力文だけです。過去の履歴・資料・WSPデータは自動送信しません。Android APKには通信権限がなく利用できません。'}));
+  const endpoint=field('接続先（例：http://127.0.0.1:1234/v1/chat/completions）','text');
+  endpoint.input.value=remoteConnection?.endpoint||'http://127.0.0.1:1234/v1/chat/completions';
+  endpoint.input.maxLength=600;
+  const model=field('モデルID（サーバーで利用可能な名前）','text');
+  model.input.value=remoteConnection?.modelId||'';model.input.maxLength=120;
+  const source=field('モデルの入手元・配布元','text');
+  source.input.value=remoteConnection?.source||'';source.input.maxLength=500;
+  const license=field('モデルのライセンス（自身で確認）','text');
+  license.input.value=remoteConnection?.license||'';license.input.maxLength=120;
+  const status=el('div',{class:'listentry',text:'未接続。通信はまだ行っていません。'});
+  const saveButton=el('button',{class:'btn primary',text:'接続設定を有効にする',onClick:()=>{
+    try{
+      const url=new URL(endpoint.input.value.trim());
+      const connection={
+        endpoint:url.toString(),origin:url.origin,modelId:model.input.value.trim(),
+        source:source.input.value.trim(),license:license.input.value.trim()
+      };
+      const provider=createHTTPChatProvider({
+        endpoint:connection.endpoint,
+        modelRecord:{modelId:connection.modelId,source:connection.source,license:connection.license,sha256:null},
+        networkPolicy:createNetworkPolicy({enabled:true,allowedOrigins:[connection.origin]})
+      });
+      remoteConnection={...connection,provider};
+      byId('inferenceMode').value='remote';
+      updateModelStatus();
+      status.textContent='設定を有効にしました。通信テストは未実施です。チャットで送信する際に毎回、接続先を表示して確認します。';
+    }catch(err){status.textContent='接続設定を拒否：'+err.message;}
+  }});
+  const disconnect=el('button',{class:'btn',text:'外部LLM設定を無効化',onClick:()=>{
+    remoteConnection=null;byId('inferenceMode').value='local';updateModelStatus();
+    status.textContent='外部LLM設定を無効化しました。WSPオフラインに戻りました。';
+  }});
+  root.append(endpoint.wrapper,model.wrapper,source.wrapper,license.wrapper,
+    el('div',{class:'buttons'},saveButton,disconnect),status,
+    el('p',{class:'muted',text:'HTTPは127.0.0.1等のループバックに限定し、それ以外はHTTPSのみ許可。サーバー側でCORSが許可されていない場合はブラウザ接続できません。モデルの出典・ライセンスは自己申告であり、重みや偏向は検証していません。設定・認証情報は保存しません。'}));
+}
+function commitChatAnswer(c,text,answer){
+  c.messages.push({role:'user',text,at:new Date().toISOString()},{role:'assistant',text:answer,at:new Date().toISOString()});
+  if(c.messages.length>MAX_MESSAGES)c.messages.splice(0,c.messages.length-MAX_MESSAGES);
+  if(c.title==='新しい会話')c.title=text.replace(/\s+/g,' ').slice(0,36);
+  c.draft='';
+  if(current().id===c.id){$input.value='';resize();save();draw();$input.focus();}
+  else{save();drawHistory();}
+}
 async function send(event){
   event?.preventDefault();
   const text=$input.value.trim();if(!text)return;
+  if(remoteSending)return;
   const c=current();let answer;
+  if(byId('inferenceMode').value==='remote'&&!/^\//.test(text)){
+    if(!remoteConnection){notify('LLM未設定のため送信しません。');openPanel('model');return;}
+    const connection=remoteConnection;
+    if(!confirm('入力文を外部LLMへ送信します。\n送信先：'+connection.origin+'\nモデル：'+connection.modelId+'\n送信する内容：現在の入力文のみ（履歴・資料は送信しません）\n続けますか？'))return;
+    remoteSending=true;byId('send').disabled=true;$input.disabled=true;
+    try{
+      const router=new InferenceRouter({
+        localProvider:createWSPProvider(engine,{getState:()=>c,getContext:()=>({knowledge:db.knowledge,documents:db.documents,generator})}),
+        remoteProvider:connection.provider
+      });
+      const result=await router.generate(text,{route:'remote',consent:true});
+      commitChatAnswer(c,text,'［外部LLM：'+connection.modelId+'］\n'+result.text);
+    }catch(err){
+      notify('LLM要求に失敗。入力は保持しました。接続先・CORS・サーバー稼働状況を確認してください。');
+    }finally{
+      remoteSending=false;byId('send').disabled=false;$input.disabled=false;
+    }
+    return;
+  }
   if(/^\/(?:image|audio|video|gif|webm)(?:\s|$)/i.test(text)){
     const cmd=text.slice(1).split(/\s+/)[0].toLowerCase(),p=text.slice(cmd.length+1).trim();
     try{await studio.ensureLoaded();const kind=cmd==='video'?'gif':cmd;
@@ -159,10 +235,7 @@ async function send(event){
       else {const numbers=arg.split(/[,，\s]+/).map(x=>Number(x));answer='WSPグラフ出力：'+JSON.stringify(engine.graph.run(numbers).outputs);}
     }catch(e){answer='WSPグラフ入力拒否：'+e.message;}
   }else answer=engine.reply(text,c,{knowledge:db.knowledge,documents:db.documents,generator});
-  c.messages.push({role:'user',text,at:new Date().toISOString()},{role:'assistant',text:answer,at:new Date().toISOString()});
-  if(c.messages.length>MAX_MESSAGES)c.messages.splice(0,c.messages.length-MAX_MESSAGES);
-  if(c.title==='新しい会話')c.title=text.replace(/\s+/g,' ').slice(0,36);
-  c.draft='';$input.value='';resize();save();draw();$input.focus();
+  commitChatAnswer(c,text,answer);
 }
 function newChat(){const c=createChat();db.chats.unshift(c);if(db.chats.length>MAX_CHATS)db.chats.pop();db.current=c.id;save();draw();$input.value='';resize();sidebarClose();$input.focus();}
 function deleteChat(){const c=current();if(c.messages.length && !confirm(`「${c.title}」を削除しますか？ 会話内のメモ・タスク・学習も削除されます。`))return;
@@ -193,7 +266,7 @@ function openPanel(which){
   priorFocus=document.activeElement;
   byId('scrim').classList.remove('hidden');byId('panel').classList.remove('hidden');
   byId('panelBody').replaceChildren();
-  if(which==='knowledge')renderKnowledge();else if(which==='documents')renderDocuments();else if(which==='circuit')renderCircuit();else if(which==='generator')renderGenerator();else if(which==='bulk')renderBulk();else if(which==='auto')renderAutoDesign();else if(which==='graph')renderGraph();else if(which==='factory')renderFactory();else if(which==='induce')renderInduction();else if(which==='agent')renderTaskAgent();else if(which==='studio'){panelIntro('メディア工房','画像・音声・動画をゼロから生成し、作品ZIPに統合。WSP重みで生成を調整できます。');studio.ensureLoaded().then(()=>{if(!byId('panel').classList.contains('hidden')&&byId('panelTitle').textContent==='メディア工房')studio.render(byId('panelBody'),{notify});}).catch(e=>notify(e.message));}
+  if(which==='model')renderModelSettings();else if(which==='knowledge')renderKnowledge();else if(which==='documents')renderDocuments();else if(which==='circuit')renderCircuit();else if(which==='generator')renderGenerator();else if(which==='bulk')renderBulk();else if(which==='auto')renderAutoDesign();else if(which==='graph')renderGraph();else if(which==='factory')renderFactory();else if(which==='induce')renderInduction();else if(which==='agent')renderTaskAgent();else if(which==='studio'){panelIntro('メディア工房','画像・音声・動画をゼロから生成し、作品ZIPに統合。WSP重みで生成を調整できます。');studio.ensureLoaded().then(()=>{if(!byId('panel').classList.contains('hidden')&&byId('panelTitle').textContent==='メディア工房')studio.render(byId('panelBody'),{notify});}).catch(e=>notify(e.message));}
   byId('closePanel').focus();
 }
 function closePanel(){byId('panel').classList.add('hidden');byId('scrim').classList.add('hidden');priorFocus?.focus?.();}
@@ -624,6 +697,12 @@ function renderInduction(){
 byId('pinChat').addEventListener('click',togglePin);
 for(const key of ['newSidebar','newTop'])byId(key).addEventListener('click',newChat);
 byId('chatForm').addEventListener('submit',send);
+byId('modelSettings').addEventListener('click',()=>openPanel('model'));
+byId('inferenceMode').addEventListener('change',()=>{
+  if(byId('inferenceMode').value==='remote'&&!remoteConnection){
+    updateModelStatus();notify('外部LLMの接続先を先に設定してください。');openPanel('model');
+  }
+});
 $input.addEventListener('keydown',event=>{if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)&&!event.isComposing&&event.keyCode!==229){event.preventDefault();send();}});
 $input.addEventListener('input',()=>{current().draft=$input.value.slice(0,3000);save();resize();});
 byId('menu').addEventListener('click',()=>$sidebar.classList.toggle('open'));
@@ -640,4 +719,5 @@ byId('docPicker').addEventListener('change',addDocuments);
 byId('closePanel').addEventListener('click',closePanel);
 byId('scrim').addEventListener('click',closePanel);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!byId('panel').classList.contains('hidden'))closePanel();});
+updateModelStatus();
 init();
