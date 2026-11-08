@@ -172,6 +172,10 @@ jobs:
             --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
             --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
             > /tmp/sol0-lazy-first.json
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            --row=0 > /tmp/sol0-lazy-row-first.json
           python - <<'PY'
           import json, math, struct
           with open('/tmp/sol0-lazy-first.json', encoding='utf-8') as f:
@@ -189,6 +193,22 @@ jobs:
           assert result['diskReassembly'] is False and result['wholeModelRun'] is False
           print('Qwen quantized kernel matches independent original-file calculation:',reference)
           print('Parts touched:',result['uniqueChunksRead'],'/',result['chunksAvailable'])
+          with open('/tmp/sol0-lazy-row-first.json',encoding='utf-8') as f:
+              row=json.load(f)
+          assert 32 <= row['rowColumns'] <= 32768
+          byte_count=row['rowColumns']//32*34
+          with open('/tmp/sol0-lazy-qwen.gguf','rb') as f:
+              f.seek(row['sourceOffset'])
+              payload=f.read(byte_count)
+          assert len(payload)==byte_count
+          row_reference=0
+          for i in range(row['rowColumns']//32):
+              block=payload[i*34:(i+1)*34]
+              scale=struct.unpack('<e',block[:2])[0]
+              row_reference+=sum(scale*w for w in struct.unpack('32b',block[2:]))
+          assert math.isclose(row_reference,row['numericDot'],rel_tol=1e-5,abs_tol=1e-4),(row_reference,row)
+          assert row['uniqueChunksRead'] < row['chunksAvailable']
+          print('Full Qwen Q8 neuron row matches independent original-file calculation:',row_reference)
           PY
       - name: Delete original complete GGUF then compute again solely from slices
         run: |
@@ -198,6 +218,10 @@ jobs:
             --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
             --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
             > /tmp/sol0-lazy-no-original.json
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            --row=0 > /tmp/sol0-lazy-row-no-original.json
           python - <<'PY'
           import json
           with open('/tmp/sol0-lazy-first.json',encoding='utf-8') as f:
@@ -206,5 +230,10 @@ jobs:
               after=json.load(f)
           assert before==after,(before,after)
           assert after['uniqueChunksRead'] < after['chunksAvailable']
-          print('Success: Qwen weight calculation from verified chunks with zero reconstructed model files')
+          with open('/tmp/sol0-lazy-row-first.json',encoding='utf-8') as f:
+              row_before=json.load(f)
+          with open('/tmp/sol0-lazy-row-no-original.json',encoding='utf-8') as f:
+              row_after=json.load(f)
+          assert row_before==row_after,(row_before,row_after)
+          print('Success: Qwen Q8 full-row weight calculation from verified chunks with zero reconstructed model files')
           PY
