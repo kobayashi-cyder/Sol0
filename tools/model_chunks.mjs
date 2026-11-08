@@ -139,7 +139,12 @@ export async function reassembleModelBytes(manifestPath, outputFile) {
     destination = await open(out, 'wx', 0o600); created = true;
     for (const part of manifest.parts) {
       const chunkPath = join(partDir, part.name);
-      const partInfo = await lstat(chunkPath);
+      let partInfo;
+      try { partInfo = await lstat(chunkPath); }
+      catch (error) {
+        if (error.code === 'ENOENT') throw new Error('Model chunk missing or wrong length: ' + part.name);
+        throw error;
+      }
       if (!partInfo.isFile() || partInfo.size !== part.bytes) {
         throw new Error('Model chunk missing or wrong length: ' + part.name);
       }
