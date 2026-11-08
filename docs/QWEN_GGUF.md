@@ -68,7 +68,7 @@ Sol0で「LLM接続設定」を開き、接続先・モデルIDを入力し、�
 - 既存のUIは現在の質問文のみ送信し、履歴・資料を自動送信しません。承認前はリクエストしません。
 - 信頼できるPC上でのみ起動してください。同一PCの他プログラムからのローカルHTTPアクセスを完全には隔離できません。
 - Android APKはINTERNET権限なしのため本経路は利用不可。Android実機推論は未実装・未検証です。
-- 実GGUF、実llama-server、実端末を使ったEnd-to-End推論はまだ未検証です。テストは合成GGUFと模擬プロセスが中心です。
+- **実Qwenのみ検証済み**：この積み上げブランチの[Actions #42534475148](https://github.com/kobayashi-cyder/Sol0/actions/runs/42534475148)で、公式Qwen3-0.6B-Q8_0.ggufの配布元SHA256照合、llama.cppの実CPU起動、Sol0推論アダプター経由のHTTP生成を成功確認（モデルID=sol0-qwen、応答は「えい。」、フォールバックなし）。これはモデル接続の証拠であり、回答品質・ブラウザからの実CORS・Android実機の成功ではありません。Kimi実モデルは未検証です。
 
 ## テスト
 
