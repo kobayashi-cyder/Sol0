@@ -209,3 +209,16 @@ test('complete Kimi SHA256 manifest is verified byte-for-byte before subprocess 
     await assert.rejects(verifyKimiShardHashes(summary,manifest),/every shard/);
   } finally {await rm(dir,{recursive:true,force:true});}
 });
+
+test('sliced loading: Kimi CPU offload is bounded, explicit and disabled by default', () => {
+  const base=parseKimiArgs(['--model-dir=/tmp/Kimi']);
+  assert.equal(base.cpuOffloadGb,null);
+  assert.ok(!buildVllmArgs(base).includes('--cpu-offload-gb'));
+  const requested=parseKimiArgs(['--model-dir=/tmp/Kimi','--cpu-offload-gb=8.5']);
+  const args=buildVllmArgs(requested);
+  assert.equal(requested.cpuOffloadGb,8.5);
+  assert.equal(args[args.indexOf('--cpu-offload-gb')+1],'8.5');
+  for(const value of ['-1','NaN','Infinity','1025','4.123','abc']) {
+    assert.throws(()=>parseKimiArgs(['--model-dir=/tmp/Kimi','--cpu-offload-gb='+value]),/(nonnegative|safe range)/);
+  }
+});
