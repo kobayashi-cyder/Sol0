@@ -62,6 +62,7 @@ export async function runLocalProbe(options, fetchImpl = globalThis.fetch, promp
     model:options.model,
     elapsedMs:Date.now()-started,
     answerLength:result.text.length,
+    answer:result.text,
     preview:result.text.slice(0,240),
     providerId:result.providerId,
     fallback:result.fallback
