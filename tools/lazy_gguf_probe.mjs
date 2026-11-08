@@ -45,6 +45,7 @@ export async function computeLazyBlock(options){
     kernel:sample.kernel,
     numericDot:sample.dot,
     quantScale:sample.scale,
+    sourceOffset:sample.sourceOffset,
     sampledValues:sample.firstFourWeights,
     modelFileBytes:source.totalBytes,
     sourceSha256:source.sourceSha256,
