@@ -6,7 +6,7 @@
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inspectLocalKimiModel } from './kimi_model.mjs';
+import { inspectLocalKimiModel, verifyKimiShardHashes } from './kimi_model.mjs';
 import { startLocalUI } from './qwen_local.mjs';
 
 export const KIMI_ALIAS = 'sol0-kimi';
@@ -30,10 +30,10 @@ export function parseKimiArgs(argv) {
   const raw = Object.create(null);
   const keys = new Set([
     'model-dir', 'family', 'runner', 'port', 'ui-port',
-    'max-model-len', 'tensor-parallel-size', 'allow-model-code', 'help'
+    'max-model-len', 'tensor-parallel-size', 'allow-model-code', 'sha256-manifest', 'help'
   ]);
   for (const arg of argv) {
-    const m = /^--([a-z-]+)(?:=(.*))?$/.exec(arg);
+    const m = /^--([a-z0-9-]+)(?:=(.*))?$/.exec(arg);
     if (!m || !keys.has(m[1])) throw new Error('Unknown Kimi argument: ' + arg);
     const [, key, val] = m;
     if (Object.hasOwn(raw, key)) throw new Error('Duplicate Kimi argument: ' + key);
@@ -58,6 +58,7 @@ export function parseKimiArgs(argv) {
   return Object.freeze({
     modelDir, modelPort, uiPort, family, runner,
     allowModelCode: raw['allow-model-code'] === true,
+    sha256Manifest: raw['sha256-manifest'] ? resolve(raw['sha256-manifest']) : null,
     maxModelLen: positive(raw['max-model-len'] ?? '4096','--max-model-len', 131072),
     tensorParallel: positive(raw['tensor-parallel-size'] ?? '1','--tensor-parallel-size', 64)
   });
@@ -93,10 +94,12 @@ export async function launchLocalKimi(options, dependencies = {}) {
   const inspect = dependencies.inspect ?? inspectLocalKimiModel;
   const serveUI = dependencies.serveUI ?? startLocalUI;
   const spawnRunner = dependencies.spawnRunner ?? spawn;
+  const verifyHashes = dependencies.verifyHashes ?? verifyKimiShardHashes;
   const summary = await inspect(options.modelDir, {family:options.family});
   if (summary.requiresCustomCode && !options.allowModelCode) {
     throw new Error('Kimi model requests custom Python code. Review trusted local code and add --allow-model-code explicitly');
   }
+  if (options.sha256Manifest) await verifyHashes(summary, options.sha256Manifest);
   const ui = await serveUI({port:options.uiPort});
   let child;
   try {
@@ -107,7 +110,7 @@ export async function launchLocalKimi(options, dependencies = {}) {
     ui.close();
     throw error;
   }
-  return {ui, child, summary};
+  return {ui, child, summary, hashesVerified: !!options.sha256Manifest};
 }
 
 export const KIMI_HELP = [
@@ -115,6 +118,7 @@ export const KIMI_HELP = [
   'node tools/kimi_local.mjs --model-dir=/absolute/path/to/Kimi-VL-A3B-Instruct --allow-model-code',
   'Optional: --runner=/path/to/vllm --family=auto --port=9932 --ui-port=8766',
   'Optional: --tensor-parallel-size=1 --max-model-len=4096',
+  'Optional: --sha256-manifest=/path/to/hashes.json verifies all safetensors shards',
   'Kimi-Dev-72B uses qwen2 architecture; requires --family=kimi-dev.',
   '--allow-model-code explicitly authorizes model-supplied Python in the local checkpoint.',
   'Review it before using; this does NOT sandbox arbitrary Python.',
@@ -129,7 +133,7 @@ async function main() {
   process.stdout.write([
     'Kimi model config: ' + run.summary.modelType,
     'Safetensors shards inspected: ' + run.summary.headersChecked,
-    'Checkpoint bytes authenticated by SHA256: false (headers only)',
+    'All shard SHA256 values matched supplied manifest: ' + run.hashesVerified,
     'vLLM starting; wait for its model-ready log before using Sol0.',
     'Sol0 UI: http://127.0.0.1:' + options.uiPort + '/SolZero_Chat_Offline.html',
     'Sol0 LLM endpoint: http://127.0.0.1:' + options.modelPort + '/v1/chat/completions',
