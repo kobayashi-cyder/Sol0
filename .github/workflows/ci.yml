@@ -76,3 +76,53 @@ jobs:
         run: python scripts/browser_input_smoke.py
       - name: Opt-in LLM UI and per-message consent (mock network)
         run: python scripts/browser_model_smoke.py
+
+  # Explicit feature-branch trial: real official Qwen model is downloaded only
+  # to the ephemeral CI runner, verified by SHA256, and never uploaded/artifacted.
+  # Not a required job for ordinary Sol0 or Android PRs.
+  qwen-real-e2e:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/kimi-local-vllm-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build pinned llama.cpp CPU server without downloader
+        run: |
+          git clone --depth 1 --branch b12135 https://github.com/ggml-org/llama.cpp.git /tmp/sol0-llama
+          cmake -S /tmp/sol0-llama -B /tmp/sol0-llama-build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DGGML_NATIVE=OFF
+          cmake --build /tmp/sol0-llama-build --target llama-server --parallel 2
+      - name: Download official Qwen3-0.6B Q8 model, verify source SHA256
+        run: |
+          curl --fail --location --retry 3 --max-time 600 --output /tmp/sol0-qwen.gguf \
+            https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+          echo '9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031  /tmp/sol0-qwen.gguf' | sha256sum --check
+      - name: Generate a real Qwen response through Sol0 consent-gated adapter
+        run: |
+          node tools/qwen_local.mjs --model=/tmp/sol0-qwen.gguf \
+            --runner=/tmp/sol0-llama-build/bin/llama-server > /tmp/sol0-qwen-server.log 2>&1 &
+          model_pid=$!
+          trap 'kill "$model_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 150); do
+            if curl --silent --fail --max-time 2 http://127.0.0.1:9931/health | grep -q '"status":"ok"'; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$model_pid" 2>/dev/null; then
+              tail -n 100 /tmp/sol0-qwen-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            tail -n 100 /tmp/sol0-qwen-server.log
+            echo 'Qwen model did not become ready'
+            exit 1
+          fi
+          node tools/local_model_smoke.mjs --consent \
+            --endpoint=http://127.0.0.1:9931/v1/chat/completions \
+            --model=sol0-qwen
+          echo 'Real official Qwen inference finished; no weights or server binaries exported.'
