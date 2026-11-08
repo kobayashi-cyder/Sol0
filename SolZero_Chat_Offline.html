@@ -34,6 +34,7 @@
 @media (pointer:coarse){.top-btn,.btn,.side-btn,.chat-nav,.example{min-height:44px}.send{min-height:48px;min-width:56px}}
 :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.inference-strip{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;font-size:12px;color:var(--sub)}.inference-strip select{max-width:190px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:8px}.inference-strip .top-btn{min-height:36px}.inference-strip #modelStatus{font-size:11px}
 </style></head><body>
 <div id="app">
 <aside id="sidebar" class="sidebar" aria-label="会話一覧">
@@ -52,14 +53,14 @@
   </div>
 </aside>
 <main class="main">
-<header class="topbar"><div><h1>Sol-Zero Chat</h1><p>学習済みモデルなし・端末内で実行</p></div><div class="head-actions">
+<header class="topbar"><div><h1>Sol-Zero Chat</h1><p>WSPは端末内実行・外部LLMは任意で明示送信</p></div><div class="head-actions">
   <span class="status">ローカル v0.15</span>
   <button class="top-btn mobile-only" id="menu" title="会話履歴" aria-label="会話履歴">☰</button>
   <button class="top-btn" id="agentBtn">🧩 タスク工房</button><button class="top-btn" id="studioBtn">🎨 メディア工房</button><button class="top-btn" id="knowledgeBtn">知識</button><button class="top-btn" id="docsBtn">資料</button><button class="top-btn" id="generatorBtn">生成実験</button><button class="top-btn" id="factoryBtn">回路工房</button><button class="top-btn" id="graphBtn">汎用WSP</button><button class="top-btn" id="induceBtn">帰納WSP</button><button class="top-btn" id="autoBtn">自動設計</button><button class="top-btn desktop-optional" id="bulkBtn">WSP拡張</button><button class="top-btn desktop-optional" id="circuitBtn">回路</button>
   <button class="top-btn" id="newTop" title="新しい会話" aria-label="新しい会話">＋</button>
 </div></header>
 <section id="messages" class="messages" role="log" aria-label="チャットメッセージ"></section>
-<footer class="composer-wrap"><form id="chatForm" class="composer"><textarea id="input" rows="1" maxlength="3000" placeholder="チャット、/agent help、/image 海、/code python fibonacci など…" aria-label="メッセージを入力"></textarea><button id="send" class="send" type="submit">送信</button></form><div class="disclaimer">Enter：改行 ／ Ctrl+Enter・⌘+Enter：送信 ／ Android：送信ボタン</div><div class="disclaimer">ルール・WSP・スクラッチ分類器と手続き的メディア生成に対応。高度な汎用生成AIではありません。</div></footer>
+<footer class="composer-wrap"><div class="inference-strip"><label for="inferenceMode">応答方式</label><select id="inferenceMode" aria-label="応答方式"><option value="local">WSP（オフライン）</option><option value="remote">外部LLM（毎回確認）</option></select><button type="button" id="modelSettings" class="top-btn">LLM接続設定</button><span id="modelStatus" role="status">LLM未設定・通信なし</span></div><form id="chatForm" class="composer"><textarea id="input" rows="1" maxlength="3000" placeholder="チャット、/agent help、/image 海、/code python fibonacci など…" aria-label="メッセージを入力"></textarea><button id="send" class="send" type="submit">送信</button></form><div class="disclaimer">Enter：改行 ／ Ctrl+Enter・⌘+Enter：送信 ／ Android：送信ボタン</div><div class="disclaimer">既定はオフラインWSP。外部LLMは設定後、入力文を送信するときだけ確認します。</div></footer>
 </main></div>
 <div id="scrim" class="scrim hidden"></div>
 <section id="panel" class="panel hidden" role="dialog" aria-modal="true" aria-labelledby="panelTitle"><header class="panel-head"><h2 id="panelTitle">設定</h2><button id="closePanel" class="top-btn" aria-label="閉じる">× 閉じる</button></header><div id="panelBody" class="panel-body"></div><footer id="panelFoot" class="panel-foot">すべて端末内で処理します。</footer></section>
@@ -2759,9 +2760,266 @@ class MediaStudio {
 
 
 
+/**
+ * Opt-in inference boundary for Sol0, used by the optional browser UI and CLI.
+ * The default chat route remains the existing offline WSP, with no network egress.
+ * No model weights, credentials, telemetry, or remote calls are bundled here.
+ */
+
+const INFERENCE_LIMITS = Object.freeze({
+  inputChars: 8000,
+  outputChars: 20000,
+  responseChars: 256000,
+  timeoutMs: 30000
+});
+
+function requiredText(value, label, max = 200) {
+  if (typeof value !== 'string' || !value.trim() || value.length > max) {
+    throw new TypeError(label + ' must be nonempty text of at most ' + max + ' characters');
+  }
+  return value.trim();
+}
+
+function checkPrompt(value) {
+  return requiredText(value, 'prompt', INFERENCE_LIMITS.inputChars);
+}
+
+function checkOutput(value) {
+  if (typeof value !== 'string' || value.length > INFERENCE_LIMITS.outputChars) {
+    throw new Error('Inference output is not bounded text');
+  }
+  return value;
+}
+
+/**
+ * Provenance is descriptive, not a claim that an unknown model has been audited.
+ * An absent sha256 is recorded as null rather than presented as verified.
+ */
+function validateModelRecord(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    throw new TypeError('Model record is required');
+  }
+  const modelId = requiredText(record.modelId, 'modelId', 120);
+  const source = requiredText(record.source, 'source', 500);
+  const license = requiredText(record.license, 'license', 120);
+  const sha256 = record.sha256 == null ? null : requiredText(record.sha256, 'sha256', 64).toLowerCase();
+  if (sha256 !== null && !/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new TypeError('sha256 must be 64 hexadecimal characters');
+  }
+  return Object.freeze({ modelId, source, license, sha256, hashVerified: false });
+}
+
+function parseUrl(input) {
+  let url;
+  try { url = new URL(input); } catch { throw new TypeError('Invalid endpoint or origin URL'); }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new TypeError('Credentials, query strings and fragments are not allowed in inference URLs');
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new TypeError('Only HTTP(S) inference URLs are supported');
+  }
+  const isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol === 'http:' && !isLoopback) {
+    throw new TypeError('Unencrypted HTTP is permitted only on loopback');
+  }
+  return url;
+}
+
+/** Explicit, immutable allowlist. Empty or disabled policies prohibit all egress. */
+function createNetworkPolicy({ enabled = false, allowedOrigins = [] } = {}) {
+  if (typeof enabled !== 'boolean' || !Array.isArray(allowedOrigins)) {
+    throw new TypeError('Invalid network policy');
+  }
+  const origins = allowedOrigins.map(origin => {
+    const value = requiredText(origin, 'origin', 300);
+    const url = parseUrl(value);
+    if (value !== url.origin) throw new TypeError('Allowlist entry must be an exact origin');
+    return url.origin;
+  });
+  return Object.freeze({ enabled, allowedOrigins: Object.freeze([...new Set(origins)]) });
+}
+
+function createLocalProvider(generate, id = 'sol0-wsp') {
+  if (typeof generate !== 'function') throw new TypeError('Local provider requires generate(text)');
+  const providerId = requiredText(id, 'provider id', 80);
+  return Object.freeze({
+    id: providerId,
+    async generate(prompt, options = {}) {
+      checkPrompt(prompt);
+      return checkOutput(await generate(prompt, options));
+    }
+  });
+}
+
+/** Adapts the existing synchronous SolZeroEngine.reply() without changing it. */
+function createWSPProvider(engine, { getState, getContext } = {}) {
+  if (!engine || typeof engine.reply !== 'function') {
+    throw new TypeError('Existing WSP engine must provide reply()');
+  }
+  if (getState !== undefined && typeof getState !== 'function') throw new TypeError('getState must be a function');
+  if (getContext !== undefined && typeof getContext !== 'function') throw new TypeError('getContext must be a function');
+  return createLocalProvider(
+    prompt => engine.reply(prompt, getState ? getState() : undefined, getContext ? getContext() : undefined)
+  );
+}
+
+/**
+ * Read response incrementally: checking length after response.text() would
+ * already have allocated an unbounded body from an untrusted model server.
+ */
+async function readBoundedResponse(response) {
+  const max = INFERENCE_LIMITS.responseChars;
+  const declared = response.headers?.get?.('content-length');
+  if (declared != null && /^\d+$/.test(declared) && Number(declared) > max) {
+    throw new Error('Model server response exceeds allowed size');
+  }
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    // Compatibility for test doubles and older transports lacking a stream.
+    const raw = await response.text();
+    if (new TextEncoder().encode(raw).length > max) {
+      throw new Error('Model server response exceeds allowed size');
+    }
+    return raw;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let bytes = 0, result = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) throw new Error('Invalid model server response chunk');
+      bytes += value.byteLength;
+      if (bytes > max) throw new Error('Model server response exceeds allowed size');
+      result += decoder.decode(value, { stream: true });
+    }
+    result += decoder.decode();
+    return result;
+  } finally {
+    if (typeof reader.cancel === 'function') {
+      try { await reader.cancel(); } catch { /* best effort */ }
+    }
+    reader.releaseLock?.();
+  }
+}
+
+/**
+ * OpenAI-compatible chat-completions transport, usable with a user-run local
+ * server or explicitly approved HTTPS server. No credentials are supported.
+ * A caller must set BOTH networkPolicy.enabled and per-request consent=true.
+ */
+function createHTTPChatProvider({
+  endpoint,
+  modelRecord,
+  networkPolicy = createNetworkPolicy(),
+  fetchImpl = globalThis.fetch
+}) {
+  const url = parseUrl(requiredText(endpoint, 'endpoint', 600));
+  if (!url.pathname.endsWith('/v1/chat/completions')) {
+    throw new TypeError('Only /v1/chat/completions endpoints are supported');
+  }
+  const metadata = validateModelRecord(modelRecord);
+  if (!networkPolicy || networkPolicy.enabled !== true && networkPolicy.enabled !== false
+      || !Array.isArray(networkPolicy.allowedOrigins)) {
+    throw new TypeError('Invalid network policy');
+  }
+  const allowlist = createNetworkPolicy(networkPolicy);
+  return Object.freeze({
+    id: 'http:' + metadata.modelId,
+    model: metadata,
+    async generate(prompt, { consent = false, signal } = {}) {
+      const text = checkPrompt(prompt);
+      if (!allowlist.enabled || !allowlist.allowedOrigins.includes(url.origin)) {
+        throw new Error('External inference is disabled or endpoint is not allowlisted');
+      }
+      if (consent !== true) {
+        throw new Error('Explicit consent is required for every external inference');
+      }
+      if (typeof fetchImpl !== 'function') throw new Error('No HTTP transport is available');
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal?.aborted) throw new Error('Inference cancelled');
+      signal?.addEventListener('abort', abort, { once: true });
+      const timeout = setTimeout(abort, INFERENCE_LIMITS.timeoutMs);
+      try {
+        const response = await fetchImpl(url.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: metadata.modelId,
+            messages: [{ role: 'user', content: text }],
+            max_tokens: 768,
+            stream: false
+          }),
+          credentials: 'omit',
+          redirect: 'error',
+          referrerPolicy: 'no-referrer',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        if (!response || response.ok !== true) throw new Error('Model server rejected the request');
+        const raw = await readBoundedResponse(response);
+        let payload;
+        try { payload = JSON.parse(raw); } catch { throw new Error('Model server response is not JSON'); }
+        return checkOutput(payload?.choices?.[0]?.message?.content);
+      } finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', abort);
+      }
+    }
+  });
+}
+
+/**
+ * Remote inference is never selected implicitly. Audit events contain metadata
+ * only; prompts, replies and document bodies are deliberately omitted.
+ */
+class InferenceRouter {
+  constructor({ localProvider, remoteProvider = null, onAudit = () => {} } = {}) {
+    if (!localProvider || typeof localProvider.generate !== 'function') {
+      throw new TypeError('A local provider is mandatory');
+    }
+    if (remoteProvider !== null && typeof remoteProvider.generate !== 'function') {
+      throw new TypeError('Invalid remote provider');
+    }
+    if (typeof onAudit !== 'function') throw new TypeError('onAudit must be a function');
+    this.localProvider = localProvider;
+    this.remoteProvider = remoteProvider;
+    this.onAudit = onAudit;
+  }
+
+  audit(event, provider, outcome) {
+    try { this.onAudit(Object.freeze({ event, provider: String(provider.id), outcome })); }
+    catch { /* Audit diagnostics must not leak content or break local inference. */ }
+  }
+
+  async generate(prompt, { route = 'local', consent = false, fallbackOnError = false, signal } = {}) {
+    checkPrompt(prompt);
+    if (route !== 'local' && route !== 'remote') throw new TypeError('Unknown inference route');
+    if (route === 'remote' && consent !== true) {
+      throw new Error('Remote inference requires per-request consent');
+    }
+    const provider = route === 'remote' ? this.remoteProvider : this.localProvider;
+    if (!provider) throw new Error('Requested inference provider is unavailable');
+    try {
+      const answer = checkOutput(await provider.generate(prompt, { consent, signal }));
+      this.audit('inference', provider, 'success');
+      return Object.freeze({ text: answer, providerId: provider.id, fallback: false });
+    } catch (error) {
+      this.audit('inference', provider, 'failure');
+      if (route !== 'remote' || fallbackOnError !== true || signal?.aborted) throw error;
+      const text = checkOutput(await this.localProvider.generate(prompt, { signal }));
+      this.audit('inference', this.localProvider, 'fallback-success');
+      return Object.freeze({ text, providerId: this.localProvider.id, fallback: true });
+    }
+  }
+}
+
 const engine=new SolZeroEngine();
 const generator=new ScratchBigram();
 const studio=new MediaStudio();
+let remoteConnection=null;
+let remoteSending=false;
 engine.bulk=new WSPBulk();
 engine.flow=new WSPFlow();
 engine.graph=new WSPGraph();
@@ -2878,10 +3136,83 @@ function draw(){drawHistory();drawMessages();$input.value=current().draft||'';re
 function resize(){$input.style.height='auto';$input.style.height=Math.min(145,$input.scrollHeight)+'px';}
 function taskAdapter(allowMediaWrites=false){return {documents:db.documents,graph:engine.graph,neural:engine.neural,cognition:engine.cognition,calculate,generateCode,generateWSPCode,allowMediaWrites,generateMedia:async(kind,opts)=>{await studio.ensureLoaded();return studio.generate(kind,opts);}};}
 function taskResultText(r){return (r.ok?'完了':'停止')+'：'+r.trace.length+'工程実行'+(r.ok?'':`。失敗工程：${r.failedAt}（${r.error}）`)+'\n'+JSON.stringify(r.ok?r.output:r.trace,null,2).slice(0,9000)+'\n※計画の実行記録です。自由なAI推論の証明ではありません。';}
+
+function updateModelStatus(){
+  byId('modelStatus').textContent=remoteConnection?'LLM設定済（通信未検証）':'LLM未設定・通信なし';
+  if(!remoteConnection&&byId('inferenceMode').value==='remote')byId('inferenceMode').value='local';
+}
+function renderModelSettings(){
+  panelIntro('外部LLM接続（実験機能）','既定はWSP。外部LLMへの送信には毎回確認が必要です。設定はページ再読込で消えます。');
+  const root=byId('panelBody');root.replaceChildren();
+  root.append(el('p',{class:'muted',text:'外部LLMは利用者が別途起動・管理するOpenAI互換サーバーです。Sol0にはモデルの重みもAPIキーもありません。外部送信は現在の入力文だけです。過去の履歴・資料・WSPデータは自動送信しません。Android APKには通信権限がなく利用できません。'}));
+  const endpoint=field('接続先（例：http://127.0.0.1:1234/v1/chat/completions）','text');
+  endpoint.input.value=remoteConnection?.endpoint||'http://127.0.0.1:1234/v1/chat/completions';
+  endpoint.input.maxLength=600;
+  const model=field('モデルID（サーバーで利用可能な名前）','text');
+  model.input.value=remoteConnection?.modelId||'';model.input.maxLength=120;
+  const source=field('モデルの入手元・配布元','text');
+  source.input.value=remoteConnection?.source||'';source.input.maxLength=500;
+  const license=field('モデルのライセンス（自身で確認）','text');
+  license.input.value=remoteConnection?.license||'';license.input.maxLength=120;
+  const status=el('div',{class:'listentry',text:'未接続。通信はまだ行っていません。'});
+  const saveButton=el('button',{class:'btn primary',text:'接続設定を有効にする',onClick:()=>{
+    try{
+      const url=new URL(endpoint.input.value.trim());
+      const connection={
+        endpoint:url.toString(),origin:url.origin,modelId:model.input.value.trim(),
+        source:source.input.value.trim(),license:license.input.value.trim()
+      };
+      const provider=createHTTPChatProvider({
+        endpoint:connection.endpoint,
+        modelRecord:{modelId:connection.modelId,source:connection.source,license:connection.license,sha256:null},
+        networkPolicy:createNetworkPolicy({enabled:true,allowedOrigins:[connection.origin]})
+      });
+      remoteConnection={...connection,provider};
+      byId('inferenceMode').value='remote';
+      updateModelStatus();
+      status.textContent='設定を有効にしました。通信テストは未実施です。チャットで送信する際に毎回、接続先を表示して確認します。';
+    }catch(err){status.textContent='接続設定を拒否：'+err.message;}
+  }});
+  const disconnect=el('button',{class:'btn',text:'外部LLM設定を無効化',onClick:()=>{
+    remoteConnection=null;byId('inferenceMode').value='local';updateModelStatus();
+    status.textContent='外部LLM設定を無効化しました。WSPオフラインに戻りました。';
+  }});
+  root.append(endpoint.wrapper,model.wrapper,source.wrapper,license.wrapper,
+    el('div',{class:'buttons'},saveButton,disconnect),status,
+    el('p',{class:'muted',text:'HTTPは127.0.0.1等のループバックに限定し、それ以外はHTTPSのみ許可。サーバー側でCORSが許可されていない場合はブラウザ接続できません。モデルの出典・ライセンスは自己申告であり、重みや偏向は検証していません。設定・認証情報は保存しません。'}));
+}
+function commitChatAnswer(c,text,answer){
+  c.messages.push({role:'user',text,at:new Date().toISOString()},{role:'assistant',text:answer,at:new Date().toISOString()});
+  if(c.messages.length>MAX_MESSAGES)c.messages.splice(0,c.messages.length-MAX_MESSAGES);
+  if(c.title==='新しい会話')c.title=text.replace(/\s+/g,' ').slice(0,36);
+  c.draft='';
+  if(current().id===c.id){$input.value='';resize();save();draw();$input.focus();}
+  else{save();drawHistory();}
+}
 async function send(event){
   event?.preventDefault();
   const text=$input.value.trim();if(!text)return;
+  if(remoteSending)return;
   const c=current();let answer;
+  if(byId('inferenceMode').value==='remote'&&!/^\//.test(text)){
+    if(!remoteConnection){notify('LLM未設定のため送信しません。');openPanel('model');return;}
+    const connection=remoteConnection;
+    if(!confirm('入力文を外部LLMへ送信します。\n送信先：'+connection.origin+'\nモデル：'+connection.modelId+'\n送信する内容：現在の入力文のみ（履歴・資料は送信しません）\n続けますか？'))return;
+    remoteSending=true;byId('send').disabled=true;$input.disabled=true;
+    try{
+      const router=new InferenceRouter({
+        localProvider:createWSPProvider(engine,{getState:()=>c,getContext:()=>({knowledge:db.knowledge,documents:db.documents,generator})}),
+        remoteProvider:connection.provider
+      });
+      const result=await router.generate(text,{route:'remote',consent:true});
+      commitChatAnswer(c,text,'［外部LLM：'+connection.modelId+'］\n'+result.text);
+    }catch(err){
+      notify('LLM要求に失敗。入力は保持しました。接続先・CORS・サーバー稼働状況を確認してください。');
+    }finally{
+      remoteSending=false;byId('send').disabled=false;$input.disabled=false;
+    }
+    return;
+  }
   if(/^\/(?:image|audio|video|gif|webm)(?:\s|$)/i.test(text)){
     const cmd=text.slice(1).split(/\s+/)[0].toLowerCase(),p=text.slice(cmd.length+1).trim();
     try{await studio.ensureLoaded();const kind=cmd==='video'?'gif':cmd;
@@ -2908,10 +3239,7 @@ async function send(event){
       else {const numbers=arg.split(/[,，\s]+/).map(x=>Number(x));answer='WSPグラフ出力：'+JSON.stringify(engine.graph.run(numbers).outputs);}
     }catch(e){answer='WSPグラフ入力拒否：'+e.message;}
   }else answer=engine.reply(text,c,{knowledge:db.knowledge,documents:db.documents,generator});
-  c.messages.push({role:'user',text,at:new Date().toISOString()},{role:'assistant',text:answer,at:new Date().toISOString()});
-  if(c.messages.length>MAX_MESSAGES)c.messages.splice(0,c.messages.length-MAX_MESSAGES);
-  if(c.title==='新しい会話')c.title=text.replace(/\s+/g,' ').slice(0,36);
-  c.draft='';$input.value='';resize();save();draw();$input.focus();
+  commitChatAnswer(c,text,answer);
 }
 function newChat(){const c=createChat();db.chats.unshift(c);if(db.chats.length>MAX_CHATS)db.chats.pop();db.current=c.id;save();draw();$input.value='';resize();sidebarClose();$input.focus();}
 function deleteChat(){const c=current();if(c.messages.length && !confirm(`「${c.title}」を削除しますか？ 会話内のメモ・タスク・学習も削除されます。`))return;
@@ -2942,7 +3270,7 @@ function openPanel(which){
   priorFocus=document.activeElement;
   byId('scrim').classList.remove('hidden');byId('panel').classList.remove('hidden');
   byId('panelBody').replaceChildren();
-  if(which==='knowledge')renderKnowledge();else if(which==='documents')renderDocuments();else if(which==='circuit')renderCircuit();else if(which==='generator')renderGenerator();else if(which==='bulk')renderBulk();else if(which==='auto')renderAutoDesign();else if(which==='graph')renderGraph();else if(which==='factory')renderFactory();else if(which==='induce')renderInduction();else if(which==='agent')renderTaskAgent();else if(which==='studio'){panelIntro('メディア工房','画像・音声・動画をゼロから生成し、作品ZIPに統合。WSP重みで生成を調整できます。');studio.ensureLoaded().then(()=>{if(!byId('panel').classList.contains('hidden')&&byId('panelTitle').textContent==='メディア工房')studio.render(byId('panelBody'),{notify});}).catch(e=>notify(e.message));}
+  if(which==='model')renderModelSettings();else if(which==='knowledge')renderKnowledge();else if(which==='documents')renderDocuments();else if(which==='circuit')renderCircuit();else if(which==='generator')renderGenerator();else if(which==='bulk')renderBulk();else if(which==='auto')renderAutoDesign();else if(which==='graph')renderGraph();else if(which==='factory')renderFactory();else if(which==='induce')renderInduction();else if(which==='agent')renderTaskAgent();else if(which==='studio'){panelIntro('メディア工房','画像・音声・動画をゼロから生成し、作品ZIPに統合。WSP重みで生成を調整できます。');studio.ensureLoaded().then(()=>{if(!byId('panel').classList.contains('hidden')&&byId('panelTitle').textContent==='メディア工房')studio.render(byId('panelBody'),{notify});}).catch(e=>notify(e.message));}
   byId('closePanel').focus();
 }
 function closePanel(){byId('panel').classList.add('hidden');byId('scrim').classList.add('hidden');priorFocus?.focus?.();}
@@ -3373,6 +3701,12 @@ function renderInduction(){
 byId('pinChat').addEventListener('click',togglePin);
 for(const key of ['newSidebar','newTop'])byId(key).addEventListener('click',newChat);
 byId('chatForm').addEventListener('submit',send);
+byId('modelSettings').addEventListener('click',()=>openPanel('model'));
+byId('inferenceMode').addEventListener('change',()=>{
+  if(byId('inferenceMode').value==='remote'&&!remoteConnection){
+    updateModelStatus();notify('外部LLMの接続先を先に設定してください。');openPanel('model');
+  }
+});
 $input.addEventListener('keydown',event=>{if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)&&!event.isComposing&&event.keyCode!==229){event.preventDefault();send();}});
 $input.addEventListener('input',()=>{current().draft=$input.value.slice(0,3000);save();resize();});
 byId('menu').addEventListener('click',()=>$sidebar.classList.toggle('open'));
@@ -3389,6 +3723,7 @@ byId('docPicker').addEventListener('change',addDocuments);
 byId('closePanel').addEventListener('click',closePanel);
 byId('scrim').addEventListener('click',closePanel);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!byId('panel').classList.contains('hidden'))closePanel();});
+updateModelStatus();
 init();
 
 </script>
