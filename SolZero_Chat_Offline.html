@@ -2926,6 +2926,9 @@ async function importJson(event){const file=event.target.files?.[0];event.target
   if(file.size>4000000)return notify('JSONは4MB以下にしてください。');
   const parsed=schemaRead(await file.text());if(!parsed)return notify('復元できない形式、または上限超過です。');
   if(!confirm('現在の全会話・知識・資料をバックアップの内容で置き換えます。続けますか？'))return;
+  // Persist the validated backup before replacing live state. Quota errors must leave the current session intact.
+  try{const payload=JSON.stringify(parsed);if(payload.length>3400000)throw Error('backup exceeds storage limit');localStorage.setItem(DB_KEY,payload);}
+  catch{return notify('保存容量が不足しているため復元を中止しました。既存の会話は維持されています。');}
   db=parsed;engine.router=new engine.router.constructor();if(db.wsp)engine.router.restore(db.wsp);
   engine.neural=new engine.neural.constructor();if(db.neural&&!engine.neural.restore(db.neural))notify('復元されたWSP重みは不正です。');
   engine.bulk=new WSPBulk();
