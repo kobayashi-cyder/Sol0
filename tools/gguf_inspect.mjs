@@ -2,7 +2,8 @@
  * Inspect local GGUF bytes without loading model tensors or making network calls.
  * Header metadata is not proof that the model weights are intact or trusted.
  */
-import { open, stat, createReadStream } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { open, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
 export const MAX_GGUF_METADATA_BYTES = 48 * 1024 * 1024;
