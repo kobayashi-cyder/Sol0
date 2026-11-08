@@ -86,6 +86,22 @@ node --test tests/kimi_model.test.mjs tests/local_model_smoke.test.mjs
 npm test
 ~~~
 
+## 能力別比較（実モデルがロードされた場合のみ）
+
+公開された固定質問を1件ずつ送信します。QwenとKimiで同じcaseIdを使い、出力を比較してください。
+
+~~~sh
+node tools/compare_model_capabilities.mjs --consent \
+  --endpoint=http://127.0.0.1:9931/v1/chat/completions \
+  --model=sol0-qwen --case=arithmetic
+
+node tools/compare_model_capabilities.mjs --consent \
+  --endpoint=http://127.0.0.1:9932/v1/chat/completions \
+  --model=sol0-kimi --case=arithmetic
+~~~
+
+caseIdは evaluations/local_capability_cases.json に定義（ja_instruction、arithmetic、translation、summary、code、source_uncertainty）。結果のexactMatchは単純な文字列一致だけで、コードの正しさ・翻訳品質・事実性を自動採点するものではありません。どのケースもreviewStatus=unreviewedで返し、人間の根拠ある評価が必要です。コード回答を自動実行しません。実モデルを起動できない環境では結果を捏造しません。
+
 ## セキュリティ・未達
 
 - ヘッダー検査はバイト列構造を検査するだけで、重みやコードの出典・真正性・安全性を検証しない。**ダウンロードした配布物全体のSHA256や電子署名の検証は、別途入手した信頼できる情報と照合する必要がある**。
