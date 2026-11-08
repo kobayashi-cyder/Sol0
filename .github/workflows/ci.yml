@@ -125,4 +125,10 @@ jobs:
           node tools/local_model_smoke.mjs --consent \
             --endpoint=http://127.0.0.1:9931/v1/chat/completions \
             --model=sol0-qwen
-          echo 'Real official Qwen inference finished; no weights or server binaries exported.'
+          for case_id in ja_instruction arithmetic translation summary code source_uncertainty; do
+            echo "Checking Qwen public capability case: $case_id"
+            node tools/compare_model_capabilities.mjs --consent \
+              --endpoint=http://127.0.0.1:9931/v1/chat/completions \
+              --model=sol0-qwen --case="$case_id"
+          done
+          echo 'Real official Qwen inference and public capability probes finished; no weights exported.'
