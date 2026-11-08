@@ -102,6 +102,46 @@ export function createWSPProvider(engine, { getState, getContext } = {}) {
 }
 
 /**
+ * Read response incrementally: checking length after response.text() would
+ * already have allocated an unbounded body from an untrusted model server.
+ */
+async function readBoundedResponse(response) {
+  const max = INFERENCE_LIMITS.responseChars;
+  const declared = response.headers?.get?.('content-length');
+  if (declared != null && /^\\d+$/.test(declared) && Number(declared) > max) {
+    throw new Error('Model server response exceeds allowed size');
+  }
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    // Compatibility for test doubles and older transports lacking a stream.
+    const raw = await response.text();
+    if (new TextEncoder().encode(raw).length > max) {
+      throw new Error('Model server response exceeds allowed size');
+    }
+    return raw;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let bytes = 0, result = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) throw new Error('Invalid model server response chunk');
+      bytes += value.byteLength;
+      if (bytes > max) throw new Error('Model server response exceeds allowed size');
+      result += decoder.decode(value, { stream: true });
+    }
+    result += decoder.decode();
+    return result;
+  } finally {
+    if (typeof reader.cancel === 'function') {
+      try { await reader.cancel(); } catch { /* best effort */ }
+    }
+    reader.releaseLock?.();
+  }
+}
+
+/**
  * OpenAI-compatible chat-completions transport, usable with a user-run local
  * server or explicitly approved HTTPS server. No credentials are supported.
  * A caller must set BOTH networkPolicy.enabled and per-request consent=true.
@@ -156,10 +196,7 @@ export function createHTTPChatProvider({
           signal: controller.signal
         });
         if (!response || response.ok !== true) throw new Error('Model server rejected the request');
-        const raw = await response.text();
-        if (raw.length > INFERENCE_LIMITS.responseChars) {
-          throw new Error('Model server response exceeds allowed size');
-        }
+        const raw = await readBoundedResponse(response);
         let payload;
         try { payload = JSON.parse(raw); } catch { throw new Error('Model server response is not JSON'); }
         return checkOutput(payload?.choices?.[0]?.message?.content);
