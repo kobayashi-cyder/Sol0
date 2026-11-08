@@ -95,7 +95,8 @@ test('lazy tensor reader rejects tampered bytes before any Q8 kernel executes',a
     const data=await readFile(path);data[5]^=0xff;
     await writeFile(path,data);
     const store=await openChunkModel(join(parts,'manifest.json'));
-    await assert.rejects(indexChunkedGGUF(store),/SHA256 mismatch/);
+    const index=await indexChunkedGGUF(store);
+    await assert.rejects(dotQ8ChunkBlock(store,index,{}),/SHA256 mismatch/);
   },makeQwenGGUF({crossBoundary:true}));
 });
 
