@@ -108,7 +108,7 @@ export function createWSPProvider(engine, { getState, getContext } = {}) {
 async function readBoundedResponse(response) {
   const max = INFERENCE_LIMITS.responseChars;
   const declared = response.headers?.get?.('content-length');
-  if (declared != null && /^\\d+$/.test(declared) && Number(declared) > max) {
+  if (declared != null && /^\d+$/.test(declared) && Number(declared) > max) {
     throw new Error('Model server response exceeds allowed size');
   }
   if (!response.body || typeof response.body.getReader !== 'function') {
