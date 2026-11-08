@@ -144,3 +144,67 @@ jobs:
               --model=sol0-qwen --case="$case_id"
           done
           echo 'Real official Qwen inference and public capability probes finished; no weights exported.'
+
+  # This job deliberately deletes the complete GGUF before rerunning the
+  # quantized weight kernel to prove it can compute from verified chunks alone.
+  # It does NOT claim to perform a full Transformer forward pass.
+  qwen-lazy-tensor-e2e:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Obtain official Qwen GGUF with pinned digest
+        run: |
+          curl --fail --location --retry 3 --max-time 600 --output /tmp/sol0-lazy-qwen.gguf \
+            https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+          echo '9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031  /tmp/sol0-lazy-qwen.gguf' | sha256sum --check
+      - name: Partition official GGUF and verify native quantized kernel
+        run: |
+          node tools/model_chunks.mjs split \
+            --input=/tmp/sol0-lazy-qwen.gguf \
+            --out=/tmp/sol0-lazy-qwen-slices \
+            --chunk-bytes=8388608
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            > /tmp/sol0-lazy-first.json
+          python - <<'PY'
+          import json, math, struct
+          with open('/tmp/sol0-lazy-first.json', encoding='utf-8') as f:
+              result=json.load(f)
+          with open('/tmp/sol0-lazy-qwen.gguf','rb') as f:
+              f.seek(result['sourceOffset'])
+              data=f.read(34)
+          assert len(data)==34
+          scale=struct.unpack('<e',data[:2])[0]
+          weights=struct.unpack('32b',data[2:])
+          reference=sum(scale*w for w in weights)
+          assert math.isclose(reference,result['numericDot'],rel_tol=1e-5,abs_tol=1e-4), (reference,result)
+          assert result['modelArchitecture'].startswith('qwen')
+          assert result['uniqueChunksRead'] < result['chunksAvailable'], result
+          assert result['diskReassembly'] is False and result['wholeModelRun'] is False
+          print('Qwen quantized kernel matches independent original-file calculation:',reference)
+          print('Parts touched:',result['uniqueChunksRead'],'/',result['chunksAvailable'])
+          PY
+      - name: Delete original complete GGUF then compute again solely from slices
+        run: |
+          rm /tmp/sol0-lazy-qwen.gguf
+          test ! -f /tmp/sol0-lazy-qwen.gguf
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            > /tmp/sol0-lazy-no-original.json
+          python - <<'PY'
+          import json
+          with open('/tmp/sol0-lazy-first.json',encoding='utf-8') as f:
+              before=json.load(f)
+          with open('/tmp/sol0-lazy-no-original.json',encoding='utf-8') as f:
+              after=json.load(f)
+          assert before==after,(before,after)
+          assert after['uniqueChunksRead'] < after['chunksAvailable']
+          print('Success: Qwen weight calculation from verified chunks with zero reconstructed model files')
+          PY
