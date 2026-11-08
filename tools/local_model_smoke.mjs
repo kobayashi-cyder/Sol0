@@ -10,7 +10,7 @@ import {
   createNetworkPolicy
 } from '../chat_web/inference_gateway.js';
 
-export const PROBE_PROMPT = '接続試験です。短い日本語で一文だけ回答してください。';
+export const PROBE_PROMPT = '接続試験です。短い日本語で一文だけ回答してください。 /no_think';
 
 export function parseSmokeArgs(argv) {
   const options = Object.create(null);
