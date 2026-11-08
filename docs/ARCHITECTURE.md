@@ -3,7 +3,8 @@
 ## 実行系
 
 - `chat_web/index.html` と `chat_web/app.js`：画面、会話、バックアップ、入力、localStorage保存。
-- `chat_web/engine.js`・`learned_router.js`・`bigram.js`：ルールと独自分類器に基づく応答。\n- `chat_web/inference_gateway.js`：ブラウザに任意接続するOpenAI互換LLMアダプター、ユーザー同意、送信先オリジン制限、入力/出力サイズ制限。既定はWSPで通信なし。
+- `chat_web/engine.js`・`learned_router.js`・`bigram.js`：ルールと独自分類器に基づく応答。
+- `chat_web/inference_gateway.js`：ブラウザに任意接続するOpenAI互換LLMアダプター、ユーザー同意、送信先オリジン制限、入力/出力サイズ制限。既定はWSPで通信なし。
 - `wsp_graph.js`・`wsp_induction.js`・`wsp_neural.js`・`wsp_codegen.js`：数値WSPの実行・独立評価・重み学習・コード変換。
 - `task_agent.js`：許可済み処理だけを実行する検証型タスク工房。
 - `media_studio.js`・`media_ui.js`：手続き的なPNG/WAV/GIF/WebM/ZIP作成。
