@@ -1,6 +1,6 @@
 /**
- * Opt-in inference boundary for Sol0. This module is deliberately NOT wired into
- * the production chat UI yet. Default behavior remains the existing offline WSP.
+ * Opt-in inference boundary for Sol0, used by the optional browser UI and CLI.
+ * The default chat route remains the existing offline WSP, with no network egress.
  * No model weights, credentials, telemetry, or remote calls are bundled here.
  */
 
