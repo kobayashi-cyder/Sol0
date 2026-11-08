@@ -26,11 +26,22 @@ function positive(value, name, max) {
   return n;
 }
 
+function boundedOffloadGb(value) {
+  if (!/^(?:[0-9]+)(?:\.[0-9]{1,2})?$/.test(String(value))) {
+    throw new Error('--cpu-offload-gb must be a nonnegative finite decimal (up to 2 places)');
+  }
+  const gb = Number(value);
+  if (!Number.isFinite(gb) || gb < 0 || gb > 1024) {
+    throw new Error('--cpu-offload-gb exceeds safe range');
+  }
+  return gb;
+}
+
 export function parseKimiArgs(argv) {
   const raw = Object.create(null);
   const keys = new Set([
     'model-dir', 'family', 'runner', 'port', 'ui-port',
-    'max-model-len', 'tensor-parallel-size', 'allow-model-code', 'sha256-manifest', 'help'
+    'max-model-len', 'tensor-parallel-size', 'allow-model-code', 'sha256-manifest', 'cpu-offload-gb', 'help'
   ]);
   for (const arg of argv) {
     const m = /^--([a-z0-9-]+)(?:=(.*))?$/.exec(arg);
@@ -59,6 +70,7 @@ export function parseKimiArgs(argv) {
     modelDir, modelPort, uiPort, family, runner,
     allowModelCode: raw['allow-model-code'] === true,
     sha256Manifest: raw['sha256-manifest'] ? resolve(raw['sha256-manifest']) : null,
+    cpuOffloadGb: raw['cpu-offload-gb'] === undefined ? null : boundedOffloadGb(raw['cpu-offload-gb']),
     maxModelLen: positive(raw['max-model-len'] ?? '4096','--max-model-len', 131072),
     tensorParallel: positive(raw['tensor-parallel-size'] ?? '1','--tensor-parallel-size', 64)
   });
@@ -75,6 +87,7 @@ export function buildVllmArgs(options) {
     '--no-allow-credentials',
     '--max-model-len', String(options.maxModelLen),
     '--tensor-parallel-size', String(options.tensorParallel),
+    ...(options.cpuOffloadGb === null ? [] : ['--cpu-offload-gb', String(options.cpuOffloadGb)]),
     ...(options.allowModelCode ? ['--trust-remote-code'] : [])
   ];
 }
@@ -118,6 +131,7 @@ export const KIMI_HELP = [
   'node tools/kimi_local.mjs --model-dir=/absolute/path/to/Kimi-VL-A3B-Instruct --allow-model-code',
   'Optional: --runner=/path/to/vllm --family=auto --port=9932 --ui-port=8766',
   'Optional: --tensor-parallel-size=1 --max-model-len=4096',
+  'Optional: --cpu-offload-gb=8.5 uses host RAM to reduce VRAM (slow; RAM required)',
   'Optional: --sha256-manifest=/path/to/hashes.json verifies all safetensors shards',
   'Kimi-Dev-72B uses qwen2 architecture; requires --family=kimi-dev.',
   '--allow-model-code explicitly authorizes model-supplied Python in the local checkpoint.',
