@@ -28,7 +28,7 @@ function portNumber(value, name) {
 export function parseArgs(argv) {
   const options = Object.create(null);
   for (const arg of argv) {
-    const match = /^--([a-z-]+)(?:=(.*))?$/.exec(arg);
+    const match = /^--([a-z0-9-]+)(?:=(.*))?$/.exec(arg);
     if (!match) throw new Error('Unknown argument: ' + arg);
     const [, key, value] = match;
     if (!['help', 'model', 'runner', 'port', 'ui-port', 'sha256'].includes(key)) {
