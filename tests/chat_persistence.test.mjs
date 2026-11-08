@@ -50,7 +50,7 @@ test('import refuses storage quota failure before replacing live state',async()=
  const context={db:previous,DB_KEY:'test-key',schemaRead,confirm:()=>true,
    localStorage:{setItem(){throw Error('QuotaExceededError');}},
    notify:(message)=>notices.push(message)};
- const importJson=vm.runInNewContext(source.slice(start,end)+'\\nimportJson',context,{timeout:1000});
+ const importJson=vm.runInNewContext(source.slice(start,end)+'\nimportJson',context,{timeout:1000});
  const event={target:{files:[{size:backup.length,text:async()=>backup}],value:'selected'}};
  await importJson(event);
  assert.equal(context.db,previous);
