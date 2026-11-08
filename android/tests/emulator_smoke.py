@@ -66,7 +66,7 @@ def main():
     sock.settimeout(25)
     dev = DevTools(sock)
     dev.wait_for("Boolean(document.getElementById('agentBtn') && document.getElementById('messages'))")
-    assert 'Sol-Zero' in dev.evaluate('document.title'), 'Wrong HTML page'
+    assert 'Sol0' in dev.evaluate('document.title'), 'Wrong HTML page'
     dev.wait_for("Boolean(window.SolZeroDownloads && window.__solZeroDownloadsReady)")
     print('PASS: offline WebView, built-in task UI, native download hook')
 
