@@ -38,3 +38,23 @@ test('legacy schema 1/2/3 keeps full long assistant message',()=>{
   assert.equal(restored.chats[0].messages[0].text,code);
  }
 });
+
+
+test('import refuses storage quota failure before replacing live state',async()=>{
+ const start=source.indexOf('async function importJson(event){');
+ const end=source.indexOf('\nfunction changeTheme(',start);
+ assert.ok(start>=0&&end>start);
+ const backup=encode([msg('user','incoming')]);
+ const previous={schema:3,chats:[{id:'existing',messages:[msg('user','keep me')]}]};
+ const notices=[];
+ const context={db:previous,DB_KEY:'test-key',schemaRead,confirm:()=>true,
+   localStorage:{setItem(){throw Error('QuotaExceededError');}},
+   notify:(message)=>notices.push(message)};
+ const importJson=vm.runInNewContext(source.slice(start,end)+'\\nimportJson',context,{timeout:1000});
+ const event={target:{files:[{size:backup.length,text:async()=>backup}],value:'selected'}};
+ await importJson(event);
+ assert.equal(context.db,previous);
+ assert.equal(context.db.chats[0].messages[0].text,'keep me');
+ assert.match(notices.join(' '),/容量/);
+ assert.equal(event.target.value,'');
+});
