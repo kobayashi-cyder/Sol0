@@ -77,6 +77,8 @@ jobs:
         run: python scripts/browser_induction_smoke.py
       - name: Mobile-size PNG/WAV/GIF/WebM and ZIP regression
         run: python scripts/browser_media_smoke.py
+      - name: Directed image composition and actual PNG browser smoke
+        run: python scripts/browser_scene_smoke.py
       - name: Mobile-size multi-step task workbench and media consent regression
         run: python scripts/browser_task_agent_smoke.py
       - name: Multiline input and explicit send regression
