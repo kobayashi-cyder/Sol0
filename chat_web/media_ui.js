@@ -1,5 +1,6 @@
 /** Unified offline media workspace for Sol-Zero. No external AI/services. */
 import {MEDIA_LIMITS,validateMediaSpec,renderMediaScene,audioSpec,synthSamples,wavBytes,rgbaToIndex,gifBytes,zipBytes,unzipStored,MediaWSP} from './media_studio.js';
+import {planImageScene} from './scene_director.js';
 const STORE='solzero_studio_v012_recipe',DB_NAME='solzero_media_v012';
 function element(tag,txt){const x=document.createElement(tag);if(txt!==undefined)x.textContent=txt;return x;}
 function mimeFor(name){const ext=name.toLowerCase().split('.').pop();return ({png:'image/png',gif:'image/gif',jpg:'image/jpeg',jpeg:'image/jpeg',wav:'audio/wav',mp3:'audio/mpeg',webm:'video/webm',mp4:'video/mp4'})[ext]||null;}
@@ -224,7 +225,7 @@ export class MediaStudio {
   storage.className='muted';root.append(storage);
   if(!this.recipeSaved){const warning=element('p','注意：制作設定は端末に保存されていません。作品ZIPで退避してください。');warning.className='muted';root.append(warning);}
   const setRow=(label,type,value,options=null)=>{const row=element('div');row.className='field';const caption=element('label',label),input=options?element('select'):element(type==='textarea'?'textarea':'input');if(!options&&type!=='textarea')input.type=type;if(options)for(const [val,text] of options){const option=element('option',text);option.value=val;input.append(option);}input.value=String(value);caption.append(input);row.append(caption);root.append(row);return input;};
-  const name=setRow('作品名','text',this.project.name),prompt=setRow('生成指示（対応テーマ：宇宙・海・山・森・街・花・雨・雪・夕焼け・抽象）','textarea',this.project.prompt);
+  const name=setRow('作品名','text',this.project.name),prompt=setRow('生成指示（例：左に赤い猫、右に青いロボット、夕焼けの海、水彩）','textarea',this.project.prompt);
   const seed=setRow('乱数シード','number',this.project.seed),theme=setRow('画風','text',this.project.theme,[['auto','指示から自動選択'],...['space','sea','mountain','forest','city','flowers','rain','snow','sunset','abstract'].map(x=>[x,x])]);
   const dims=setRow('画像サイズ','text',`${this.project.width}x${this.project.height}`,[['512x288','512×288'],['768x432','768×432'],['320x180','320×180'],['1024x576','1024×576']]);
   const duration=setRow('動画長（フレーム数）','text',`${this.project.frames}`,[['16','2秒'],['24','3秒'],['32','4秒'],['48','6秒']]);
@@ -269,8 +270,17 @@ export class MediaStudio {
   finally{this.drawAssets(list,notify);this.uiBusy=false;}});
   extra('全部削除',async()=>{if(!confirm('生成素材・取り込んだ素材をすべて削除しますか？'))return;try{await this.clear();this.drawAssets(list,notify);}catch(e){log.textContent='削除を中止：'+e.message;}});
   const preview=makeCanvas(320,180);preview.style.cssText='max-width:100%;height:auto;border-radius:12px;border:1px solid var(--line);margin:8px 0';root.append(preview);
-  extra('指定からプレビュー',()=>{try{const s=this.buildSpec(collect());renderMediaScene(preview.getContext('2d'),{...s,width:320,height:180},0);notify('プレビュー更新');}catch(e){log.textContent='プレビュー失敗：'+e.message;}});
-  try{renderMediaScene(preview.getContext('2d'),{...this.buildSpec(),width:320,height:180},0);}catch{}
+  const sceneReport=element('p');sceneReport.className='muted';root.append(sceneReport);
+  const showComposition=spec=>{
+    const rendered={...spec,width:320,height:180};
+    renderMediaScene(preview.getContext('2d'),rendered,0);
+    const plan=planImageScene(spec.prompt,{seed:spec.seed,theme:spec.theme,width:320,height:180});
+    const subjects=plan.subjects.length?plan.subjects.map(a=>({cat:'猫',dog:'犬',robot:'ロボット',boat:'船',house:'家',bird:'鳥',person:'人物',car:'車',tree:'木',flower:'花',moon:'月',sun:'太陽',cloud:'雲'})[a.kind]||a.kind).join('・'):'主題は指定なし';
+    sceneReport.textContent='構図：'+subjects+'｜表現：'+plan.style+'｜光：'+plan.lighting+'｜被写体'+plan.subjects.length+'件。画像AIの理解ではなくローカルのルール解析です。';
+  };
+  extra('指定からプレビュー',()=>{try{showComposition(this.buildSpec(collect()));notify('構図プレビューを更新');}catch(e){log.textContent='プレビュー失敗：'+e.message;}});
+  extra('構図サンプルを試す',()=>{try{prompt.value='左に赤い猫、右に青いロボット、夕焼けの海、水彩';showComposition(this.buildSpec(collect()));notify('構図サンプルを表示');}catch(e){log.textContent='プレビュー失敗：'+e.message;}});
+  try{showComposition(this.buildSpec());}catch{}
   root.append(element('h3','メディアWSP：生成制御重み 4×3'));
   root.append(element('p','テーマ特徴を入力とする4行×3列の重みを直接編集します。出力は描画密度・動作速度・音程へ反映されます。自然言語理解や学習済み画像生成ではありません。'));
   const ww=element('div');ww.className='buttons';root.append(ww);
