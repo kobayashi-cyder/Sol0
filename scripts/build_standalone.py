@@ -37,7 +37,7 @@ def wrap_cooperative_module(filename, exported):
 
 cooperative_modules = '\n'.join(wrap_cooperative_module(filename, exports) for filename, exports in [
     ('wsp_scene.js', ['SCENE_LIMITS','SCENE_FIELDS','createScene','validateScene','cloneScene','clearScene','mergeProposal','renderSceneToRGBA']),
-    ('wsp_router.js', ['COOP_SHAPES','COOP_LIGHTS','COOP_EXPERTS','ROUTER_FEATURES','validateCoopSpec','features','CooperativeWSP','routeExperts']),
+    ('wsp_router.js', ['COOP_SHAPES','COOP_LIGHTS','COOP_EXPERTS','ROUTER_FEATURES','validateCoopSpec','CooperativeWSP','routeExperts']),
     ('wsp_shape_expert.js', ['applyShapeExpert']),
     ('wsp_material_expert.js', ['applyMaterialExpert']),
     ('wsp_lighting_expert.js', ['applyLightingExpert']),

@@ -2792,7 +2792,7 @@ return {SCENE_LIMITS,SCENE_FIELDS,createScene,validateScene,cloneScene,clearScen
 })();
 
 
-const {COOP_SHAPES,COOP_LIGHTS,COOP_EXPERTS,ROUTER_FEATURES,validateCoopSpec,features,CooperativeWSP,routeExperts} = (() => {
+const {COOP_SHAPES,COOP_LIGHTS,COOP_EXPERTS,ROUTER_FEATURES,validateCoopSpec,CooperativeWSP,routeExperts} = (() => {
 /** Small trainable WSP expert router; weights are local and auditable. */
 const COOP_SHAPES=Object.freeze(['sphere','cube','plane','tile']);
 const COOP_LIGHTS=Object.freeze(['soft','hard','side','top','studio']);
@@ -2866,7 +2866,7 @@ class CooperativeWSP {
 }
 function routeExperts(spec,router=new CooperativeWSP()){return router.route(spec);}
 
-return {COOP_SHAPES,COOP_LIGHTS,COOP_EXPERTS,ROUTER_FEATURES,validateCoopSpec,features,CooperativeWSP,routeExperts};
+return {COOP_SHAPES,COOP_LIGHTS,COOP_EXPERTS,ROUTER_FEATURES,validateCoopSpec,CooperativeWSP,routeExperts};
 })();
 
 
