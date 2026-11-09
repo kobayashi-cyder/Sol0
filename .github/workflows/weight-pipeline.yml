@@ -32,4 +32,5 @@ jobs:
             tests/test_weight_transplant_f32.py \
             tests/test_f32_layers.py \
             tests/test_attention_moe.py \
-            tests/test_tiny_transformer.py
+            tests/test_tiny_transformer.py \
+            tests/test_tiny_token_model.py
