@@ -2479,12 +2479,19 @@ async function replaceAssetsTransaction(assets){
  return new Promise(resolve=>{
   let done=false;
   const finish=ok=>{if(done)return;done=true;db.close();resolve(ok);};
+  let tx;
   try{
-   const tx=db.transaction('assets','readwrite'),store=tx.objectStore('assets');
+   tx=db.transaction('assets','readwrite');
+   const store=tx.objectStore('assets');
    store.clear();for(const asset of assets)store.put(asset);
    tx.oncomplete=()=>finish(true);
    tx.onabort=()=>finish(false);
-  }catch{finish(false);}
+  }catch{
+   // A synchronous put() error after clear() must roll back the transaction.
+   // Resolving false without aborting could otherwise commit an empty store.
+   if(tx){try{tx.abort();}catch{}}
+   finish(false);
+  }
  });
 }
 class MediaStudio {

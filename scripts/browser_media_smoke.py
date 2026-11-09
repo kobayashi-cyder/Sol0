@@ -6,6 +6,28 @@ from browser_server import serve_root
 
 ROOT=Path(__file__).resolve().parents[1]
 
+def persisted_asset_snapshot(page):
+    return page.evaluate("""async () => {
+        const db = await new Promise((resolve, reject) => {
+            const open = indexedDB.open('solzero_media_v012');
+            open.onsuccess = () => resolve(open.result);
+            open.onerror = () => reject(open.error);
+        });
+        try {
+            const assets = await new Promise((resolve, reject) => {
+                const read = db.transaction('assets').objectStore('assets').getAll();
+                read.onsuccess = () => resolve(read.result);
+                read.onerror = () => reject(read.error);
+            });
+            return await Promise.all(assets.map(async ({bytes, ...asset}) => ({
+                ...asset,
+                bytesSha256: Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))),
+            })));
+        } finally {
+            db.close();
+        }
+    }""")
+
 def run():
     with serve_root(ROOT) as origin, sync_playwright() as playwright:
         system_chromium=which('chromium') or which('chromium-browser')
@@ -49,6 +71,32 @@ def run():
             picker.set_input_files(str(bad))
             page.wait_for_function("() => document.querySelector('#panelBody .listentry')?.textContent.includes('ZIP復元拒否：')",timeout=10000)
             assert page.locator('#panelBody .listentry').count()==before
+
+            # Queue one replacement, then cause a native synchronous DataError
+            # after clear(). Reload to verify IndexedDB rolled back both writes.
+            original_assets=persisted_asset_snapshot(page)
+            assert len(original_assets)==4
+            page.evaluate("""() => {
+                const put = IDBObjectStore.prototype.put;
+                window.__mediaRestoreWrites = 0;
+                IDBObjectStore.prototype.put = function (asset, ...keys) {
+                    if (this.name === 'assets' && this.transaction.db.name === 'solzero_media_v012'
+                        && ++window.__mediaRestoreWrites === 2) {
+                        IDBObjectStore.prototype.put = put;
+                        return put.call(this, {...asset, id: null});
+                    }
+                    return put.call(this, asset, ...keys);
+                };
+            }""")
+            picker.set_input_files(str(good))
+            expect(page.locator('#panelBody .listentry').first).to_contain_text(
+                'ZIP復元拒否：保存領域の更新に失敗',timeout=10000)
+            assert page.evaluate('window.__mediaRestoreWrites')==2
+            page.reload(wait_until='load')
+            page.locator('#studioBtn').click(force=True)
+            expect(page.locator('#panelBody .listentry b')).to_have_count(len(original_assets))
+            assert persisted_asset_snapshot(page)==original_assets
+
             picker.set_input_files(str(good))
             page.wait_for_function("() => document.querySelector('#panelBody .listentry')?.textContent.includes('作品復元完了：')",timeout=10000)
             assert page.locator('#panelBody .listentry').count()==before
