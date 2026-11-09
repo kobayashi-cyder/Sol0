@@ -1,6 +1,7 @@
 /** Unified offline media workspace for Sol-Zero. No external AI/services. */
 import {MEDIA_LIMITS,validateMediaSpec,renderMediaScene,audioSpec,synthSamples,wavBytes,rgbaToIndex,gifBytes,zipBytes,unzipStored,MediaWSP} from './media_studio.js';
 import {planImageScene} from './scene_director.js';
+import {createImageProvider} from './image_provider.js';
 const STORE='solzero_studio_v012_recipe',DB_NAME='solzero_media_v012';
 function element(tag,txt){const x=document.createElement(tag);if(txt!==undefined)x.textContent=txt;return x;}
 function mimeFor(name){const ext=name.toLowerCase().split('.').pop();return ({png:'image/png',gif:'image/gif',jpg:'image/jpeg',jpeg:'image/jpeg',wav:'audio/wav',mp3:'audio/mpeg',webm:'video/webm',mp4:'video/mp4'})[ext]||null;}
@@ -128,6 +129,26 @@ export class MediaStudio {
   this.assets=[];
  }
  async makeImage(p=this.project){const s=this.buildSpec(p),canvas=makeCanvas(s.width,s.height);renderMediaScene(canvas.getContext('2d'),s,0);const bytes=await toPng(canvas);return this.add(`media_${Date.now()}.png`,'image/png',bytes,'image',s);}
+ /**
+  * One-shot explicit local-model image. Only the returned validated PNG enters
+  * the existing atomic IndexedDB/ZIP asset path. Never replace old art on fail.
+  */
+ async makePhotorealImage(p=this.project,config={},consent=false){
+  if(this.busy)throw Error('すでに生成中です');
+  if(consent!==true)throw Error('画像ごとに接続と送信の確認が必要です');
+  this.busy=true;
+  try{
+   const spec=this.buildSpec(p);
+   const provider=createImageProvider({type:'comfyui',...config});
+   const output=await provider.generate(spec,{consent:true});
+   return await this.add('photoreal_'+Date.now()+'.png','image/png',
+     output.bytes,'photoreal',{
+       ...spec,source:'local-comfyui',model:output.model,
+       promptId:output.promptId,imageWidth:output.width,imageHeight:output.height,
+       elapsedMs:output.elapsedMs
+     });
+  }finally{this.busy=false;}
+ }
  async makeAudio(p=this.project){const spec=audioSpec({kind:p.kind,seconds:Number(p.frames)/Number(p.fps),seed:Number(p.seed),text:p.text,pitch:this.buildSpec(p).controls.pitch}),bytes=wavBytes(spec);return this.add(`audio_${Date.now()}.wav`,'audio/wav',bytes,'audio',spec);}
  async makeGif(p=this.project){const origin=this.buildSpec(p),s={...origin,width:Math.min(320,origin.width),height:Math.min(180,origin.height)},frames=[],canvas=makeCanvas(s.width,s.height),ctx=canvas.getContext('2d',{willReadFrequently:true});
   for(let i=0;i<s.frames;i++){renderMediaScene(ctx,s,i/s.fps);frames.push(rgbaToIndex(ctx.getImageData(0,0,s.width,s.height).data,s.width,s.height));if(i%5===0)await new Promise(resolve=>setTimeout(resolve,0));}
@@ -218,7 +239,7 @@ export class MediaStudio {
   return next.length;
  }
  async importMedia(files){let added=0;for(const f of [...files]){const type=mimeFor(f.name);if(!type||f.type && type!==f.type||f.size>22_000_000)continue;await this.add(`imported_${Date.now()}_${added}.${f.name.split('.').at(-1).toLowerCase()}`,type,new Uint8Array(await f.arrayBuffer()),'import',{originalName:f.name.slice(0,100)});added++;}return added;}
- render(root,helpers){const {notify}=helpers;root.replaceChildren();const notice=element('p','生成AIではなく、コードから直接画像・波形・フレームを作る独自エンジンです。学習済みモデル・通信・外部APIなし。WebMはブラウザ対応時のみ音声入りで生成します。');notice.className='muted';root.append(notice);
+ render(root,helpers){const {notify}=helpers;root.replaceChildren();const notice=element('p','通常の画像・音声・動画は通信しない手続き生成です。PCブラウザでは、別途インストールしたローカルComfyUIへ毎回の確認後だけPNG生成を依頼できます。WebMはブラウザ対応時のみ音声付きです。');notice.className='muted';root.append(notice);
   const storage=element('p',this.storageState==='saved'?
     '素材保存：端末内のIndexedDBへ完了後に反映します。':
     '注意：素材は一時保存です。画面終了前に作品ZIPを書き出してください。');
@@ -231,6 +252,31 @@ export class MediaStudio {
   const duration=setRow('動画長（フレーム数）','text',`${this.project.frames}`,[['16','2秒'],['24','3秒'],['32','4秒'],['48','6秒']]);
   const sound=setRow('音の種類','text',this.project.kind,[['ambient','アンビエント'],['waves','波音'],['wind','風音'],['tones','オリジナル電子音'],['robot','簡易ロボット声（音素風）']]);
   const speech=setRow('ロボット声の文字','text',this.project.text);
+
+  root.append(element('h3','写実画像（PCブラウザ専用・ローカルComfyUI）'));
+  const photoHint=element('p','任意機能です。ComfyUIのモデルは利用者が別途用意してください。生成要求ごとに確認します。Android APKは通信権限がなく非対応。接続情報は保存しません。');
+  photoHint.className='muted';root.append(photoHint);
+  const comfyURL=setRow('ComfyUI接続先（127.0.0.1のみ）','text','http://127.0.0.1:8188');
+  const checkpoint=setRow('モデル名（checkpointsフォルダ内）','text','model.safetensors');
+  const steps=setRow('推論ステップ','number',20);
+  const cfg=setRow('CFG','number',7);
+  const sampler=setRow('Sampler','text','euler',[
+    ['euler','euler'],['euler_ancestral','euler_ancestral'],
+    ['dpmpp_2m','dpmpp_2m'],['dpmpp_sde','dpmpp_sde'],['heun','heun']]);
+  const scheduler=setRow('Scheduler','text','normal',[
+    ['normal','normal'],['karras','karras'],['simple','simple']]);
+  const negative=setRow('避けたい表現','textarea',
+    'blurry, watermark, signature, low resolution, distorted anatomy');
+  const fallbackLabel=element('label','接続エラー時に手続き描画へ切り替える（明示許可）');
+  const fallback=element('input');fallback.type='checkbox';fallback.checked=false;
+  fallbackLabel.prepend(fallback);root.append(fallbackLabel);
+  const comfyConfig=()=>({
+    baseUrl:comfyURL.value.trim(),checkpoint:checkpoint.value.trim(),
+    steps:Number(steps.value),cfg:Number(cfg.value),sampler:sampler.value,
+    scheduler:scheduler.value,negativePrompt:negative.value,
+    timeoutMs:180000
+  });
+
   const log=element('div','準備完了。生成結果は端末に保存されます（対応ブラウザのIndexedDB）。');log.className='listentry';root.append(log);
   const btnrow=element('div');btnrow.className='buttons';root.append(btnrow);
   const collect=()=>{const [w,h]=dims.value.split('x').map(Number);const p={name:name.value.slice(0,60),prompt:prompt.value,seed:Number(seed.value),theme:theme.value,width:w,height:h,frames:Number(duration.value),fps:8,kind:sound.value,text:speech.value};this.buildSpec(p);audioSpec({kind:p.kind,seconds:p.frames/p.fps,seed:p.seed,text:p.text});this.project=p;this.saveRecipe();return p;};
@@ -243,8 +289,25 @@ export class MediaStudio {
    log.textContent=typeof result==='string'?result:`生成完了：${result.name}（${result.bytes.length.toLocaleString('ja-JP')}バイト）`;
   }catch(err){log.textContent='エラー：'+err.message;}
   finally{this.drawAssets(list,notify);b.disabled=false;this.uiBusy=false;}
- });btnrow.append(b);};
-  action('画像 PNG',p=>this.generate('image',p));action('音声 WAV',p=>this.generate('audio',p));action('動画 GIF',p=>this.generate('gif',p));action('音声付き動画 WebM',p=>this.generate('webm',p));
+ });btnrow.append(b);return b;};
+  action('画像 PNG',p=>this.generate('image',p));
+
+  const photoButton=action('写実画像 ComfyUI（毎回確認）',async p=>{
+   const config=comfyConfig();
+   const provider=createImageProvider({type:'comfyui',...config});
+   const approved=confirm('現在の画像指示を '+provider.endpoint+
+     ' のComfyUIへ送信します（モデル：'+config.checkpoint+'）。この1件を実行しますか？');
+   if(!approved)return '写実画像の送信を取り消しました。既存画像は維持しています。';
+   try{
+    return await this.makePhotorealImage(p,config,true);
+   }catch(error){
+    if(!fallback.checked)throw error;
+    const procedural=await this.generate('image',p);
+    return 'ComfyUI生成に失敗したため、許可された手続き描画で保存：'+
+      procedural.name+'（原因：'+error.message+'）';
+   }
+  });
+action('音声 WAV',p=>this.generate('audio',p));action('動画 GIF',p=>this.generate('gif',p));action('音声付き動画 WebM',p=>this.generate('webm',p));
   action('画像＋音声＋GIF一括',async p=>{const assets=await this.generateBatch(['image','audio','gif'],p);return `${assets.length}種類の素材を生成しました。作品ZIPで一括取得できます。`;});
   const extras=element('div');extras.className='buttons';root.append(extras);
   const extra=(label,fn)=>{const b=element('button',label);b.className='btn';b.addEventListener('click',async()=>{
@@ -252,7 +315,16 @@ export class MediaStudio {
   this.uiBusy=true;
   try{await fn();}catch(error){log.textContent='操作を中止：'+error.message;}
   finally{this.uiBusy=false;}
- });extras.append(b);};
+ });extras.append(b);return b;};
+  const connectionButton=extra('ComfyUI接続確認',async()=>{
+    const provider=createImageProvider({type:'comfyui',...comfyConfig()});
+    await provider.available();
+    log.textContent='ComfyUIローカルAPIに接続できました。画像モデルによる推論成功は未確認です。';
+  });
+  if(typeof window!=='undefined'&&window.SolZeroDownloads){
+    photoButton.disabled=true;connectionButton.disabled=true;
+    photoHint.textContent='Android APKは通信権限なしの完全オフライン版です。写実ComfyUIは同じPC上のブラウザ版だけで使用してください。';
+  }
   extra('全素材をZIPで書き出し',()=>{try{log.textContent='作品ZIP保存：'+this.exportZip().toLocaleString('ja-JP')+'バイト';}catch(e){log.textContent='ZIPエラー：'+e.message;}});
   const inp=element('input');inp.type='file';inp.accept='.zip,application/zip';inp.className='hidden';root.append(inp);
   extra('作品ZIPを復元',()=>inp.click());inp.addEventListener('change',async()=>{const file=inp.files?.[0];inp.value='';if(!file)return;if(this.uiBusy||this.busy)return;
