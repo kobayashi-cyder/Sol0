@@ -21,6 +21,8 @@ wsp_factory = (ROOT / 'chat_web' / 'wsp_factory.js').read_text(encoding='utf-8')
 wsp_induction = (ROOT / 'chat_web' / 'wsp_induction.js').read_text(encoding='utf-8')
 media_studio = (ROOT / 'chat_web' / 'media_studio.js').read_text(encoding='utf-8')
 media_ui = (ROOT / 'chat_web' / 'media_ui.js').read_text(encoding='utf-8')
+material_wsp = (ROOT / 'chat_web' / 'wsp_materials.js').read_text(encoding='utf-8')
+material_lab_ui = (ROOT / 'chat_web' / 'material_lab_ui.js').read_text(encoding='utf-8')
 bigram = re.sub(r'\bexport (const|class|function)\b', r'\1', bigram)
 wsp_bulk = re.sub(r'\bexport (const|class|function)\b', r'\1', wsp_bulk)
 wsp_flow = re.sub(r'\bexport (const|class|function)\b', r'\1', wsp_flow)
@@ -35,8 +37,12 @@ wsp_induction = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./wsp_graph\.js['\
 wsp_induction = '\nconst { INDUCTION_DEMO, induceAndVerify, promoteInduction } = (() => {\n' + wsp_induction + '\nreturn { INDUCTION_DEMO, induceAndVerify, promoteInduction };\n})();\n'
 wsp_factory = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./wsp_graph\.js['\"];?\s*$", '', wsp_factory, flags=re.MULTILINE)
 media_studio = re.sub(r'\bexport (const|class|function)\b', r'\1', media_studio)
+material_wsp = re.sub(r'\bexport (const|class|function)\b', r'\1', material_wsp)
+material_lab_ui = re.sub(r'\bexport (const|class|function)\b', r'\1', material_lab_ui)
+material_lab_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./wsp_materials\.js['\"];?\s*$", '', material_lab_ui, flags=re.MULTILINE)
 media_ui = re.sub(r'\bexport (const|class|function)\b', r'\1', media_ui)
 media_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./media_studio\.js['\"];?\s*$", '', media_ui, flags=re.MULTILINE)
+media_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./material_lab_ui\.js['\"];?\s*$", '', media_ui, flags=re.MULTILINE)
 code_workshop = re.sub(r'\bexport (const|class|function)\b', r'\1', code_workshop)
 task_agent = re.sub(r'\bexport (const|class|function|async function)\b', r'\1', task_agent)
 task_agent = '\nconst {TASK_AGENT_LIMITS,TASK_AGENT_TOOLS,TASK_AGENT_DEMO,validateTaskPlan,runTaskPlan,runTaskPlanAsync,taskAgentHelp} = (() => {\n' + task_agent + '\nreturn {TASK_AGENT_LIMITS,TASK_AGENT_TOOLS,TASK_AGENT_DEMO,validateTaskPlan,runTaskPlan,runTaskPlanAsync,taskAgentHelp};\n})();\n'
@@ -65,7 +71,7 @@ app = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./media_ui\.js['\"];?\s*$", 
 assert not re.search(r'(?<![a-z])import\s+\{', app)
 assert '</script' not in (task_agent + wsp_neural + banc_cognition + code_workshop + wsp_codegen + engine + bigram + wsp_bulk + wsp_flow + wsp_auto + wsp_factory + app).lower()
 bundle = ui.replace('<script type="module" src="./app.js"></script>',
-                    '<script type="module">\n' + learned_router + '\n' + code_workshop + '\n' + task_agent + '\n' + wsp_neural + '\n' + banc_cognition + '\n' + engine + '\n' + bigram + '\n' + wsp_bulk + '\n' + wsp_flow + '\n' + wsp_auto + '\n' + wsp_graph + '\n' + wsp_codegen + '\n' + wsp_factory + '\n' + wsp_induction + '\n' + media_studio + '\n' + media_ui + '\n' + app + '\n</script>')
+                    '<script type="module">\n' + learned_router + '\n' + code_workshop + '\n' + task_agent + '\n' + wsp_neural + '\n' + banc_cognition + '\n' + engine + '\n' + bigram + '\n' + wsp_bulk + '\n' + wsp_flow + '\n' + wsp_auto + '\n' + wsp_graph + '\n' + wsp_codegen + '\n' + wsp_factory + '\n' + wsp_induction + '\n' + media_studio + '\n' + material_wsp + '\n' + material_lab_ui + '\n' + media_ui + '\n' + app + '\n</script>')
 assert 'src="./app.js"' not in bundle
 path = ROOT / 'SolZero_Chat_Offline.html'
 path.write_text(bundle, encoding='utf-8')
