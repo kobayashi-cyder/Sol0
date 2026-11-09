@@ -106,13 +106,15 @@ function validateOutputImage(info){
  return {filename:info.filename,subfolder:info.subfolder,type:'output'};
 }
 function pngDimensions(bytes){
- if(bytes.length<24||PNG_SIGNATURE.some((b,i)=>bytes[i]!==b)||
-    [bytes[12],bytes[13],bytes[14],bytes[15]].join(',')!=='73,72,68,82'){
-   throw Error('ComfyUIの結果がPNG形式ではありません');
+ if(bytes.length<57||PNG_SIGNATURE.some((b,i)=>bytes[i]!==b)||
+    [bytes[12],bytes[13],bytes[14],bytes[15]].join(',')!=='73,72,68,82'||
+    bytes[8]!==0||bytes[9]!==0||bytes[10]!==0||bytes[11]!==13||
+    [bytes.at(-8),bytes.at(-7),bytes.at(-6),bytes.at(-5)].join(',')!=='73,69,78,68'){
+   throw Error('ComfyUIの結果が完全なPNG形式ではありません');
  }
  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
  const w=view.getUint32(16),h=view.getUint32(20);
- if(w<1||h<1||w>4096||h>4096)throw Error('生成PNGの寸法が不正です');
+ if(w<1||h<1||w>1024||h>1024)throw Error('生成PNGの寸法が不正です');
  return {width:w,height:h};
 }
 async function readPNG(response){
@@ -183,6 +185,8 @@ export function createComfyUIProvider(options,dependencies={}){
      if(!image)throw Error('ComfyUIの画像生成待機回数を超えました');
      const response=await request('/view','GET',null,20000,image);
      const png=await readPNG(response);
+     if(png.width!==Number(job.width)||png.height!==Number(job.height))
+       throw Error('ComfyUIの画像サイズが指定と一致しません');
      return Object.freeze({
        kind:'comfyui',mime:'image/png',bytes:png.bytes,
        width:png.width,height:png.height,
