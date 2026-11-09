@@ -41,7 +41,7 @@ node tools/qwen_local.mjs \
 ## CI上の実証
 
 - バイト分割のままQ8の部分・行演算：公式Qwen3-0.6B-Q8_0.gguf 77個のバイト断片から、原本GGUFを削除してPythonの独立計算と一致する結果を取得。独立の数値演算実験（https://github.com/kobayashi-cyder/Sol0/actions/runs/42537182123）。
-- テンソル分割による**全文字列生成**は qwen-sharded-generation-e2e ジョブで、元モデルを一時領域から削除後にllama-serverへ最初のGGUFシャードを渡し、Sol0のHTTPアダプターで日本語生成を検証する。結果はCIジョブの判定で確認し、未完了なら成功とは扱わない。
+- **テンソル分割による文章生成に成功**：Actions [#42537608185](https://github.com/kobayashi-cyder/Sol0/actions/runs/42537608185)で、公式Qwen3-0.6B-Q8_0のSHA256を確認し、llama-gguf-splitで10個のGGUFへテンソル分割、元の単体GGUFを削除、最初のシャードをllama-serverに渡してSol0の同意付きHTTP推論アダプター経由で日本語の回答を取得した。実HTTP応答705ms、空でない回答、WSPへのfallbackなし。モデル品質やメモリ効率の定量評価を意味しない。
 
 ## Kimiへの適用
 
