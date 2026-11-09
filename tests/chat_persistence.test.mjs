@@ -207,7 +207,7 @@ test('validated import commits storage and live chat once after user approval',a
  await importJson(event);
  assert.equal(writes.length,1);
  assert.equal(context.db.chats[0].messages[0].text,'imported retained WSP code');
- assert.deepEqual(context.engine.router.snapshot(),sourceBackup.wsp);
+ assert.equal(JSON.stringify(context.engine.router.snapshot()),JSON.stringify(sourceBackup.wsp));
  assert.equal(context.db.graphHistory.length,0);
  assert.match(notices.at(-1),/復元しました/);
  assert.equal(event.target.value,'');
