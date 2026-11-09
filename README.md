@@ -52,6 +52,12 @@ node tools/kimi_local.mjs --model-dir=/path/to/Kimi-VL-A3B-Instruct --allow-mode
 
 Kimi-VL-A3B-Instructの配布物は約32.8GBで、対応GPUと十分なメモリが必要です。モデルの入手・ライセンス・外部Pythonコードの安全性の確認は利用者が行います。詳細は[Sol0でKimiを使う](docs/KIMI_LOCAL.md)。実際のQwen/Kimiモデルで応答を返すか確認するには、モデル起動後に[ローカル実接続試験](tools/local_model_smoke.mjs)を実行します。同じ公開質問による比較は[能力別ローカル評価](tools/compare_model_capabilities.mjs)を使い、コードは自動実行せず、人間の評価を別途記録します。Android APKにはモデルを同梱せず、ネットワーク権限も追加しません。
 
+## 重みを復元せず一部だけ計算する実験
+
+大きなGGUFモデルをバイナリチャンクに分けたまま、必要なQwenのQ8量子化テンソルをオンデマンドで読み、実際の積和演算を行う試作を追加しました。公式Qwen3-0.6B-Q8_0の77個の断片のうち一部だけを読み、32要素ブロックおよび1行全体の計算結果を原本からの独立計算と照合済みです。Kimiのsafetensorsにもテンソル単位の選択読み出しとBF16/F16/F32の数値カーネルを追加しています。
+
+**Sol0独自のLLM全層エンジンは未実装です。** ただし、既存のllama.cppに対応するテンソル単位のGGUFシャードを使えば、シャードを1つのファイルに結合せずに全文の推論を行う経路もあります。[オンデマンド重み読み出し](docs/LAZY_TENSOR.md)と[分割GGUFからの文章生成手順](docs/SHARDED_INFERENCE.md)を区別して参照してください。
+
 ## 移行時の重要修正
 
 - Enterは改行、Ctrl+Enter / Cmd+Enterと送信ボタンが送信。日本語IME変換中は誤送信しない。

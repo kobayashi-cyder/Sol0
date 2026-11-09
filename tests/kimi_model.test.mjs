@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
-import { inspectSafetensorsFile, inspectLocalKimiModel, verifyKimiShardHashes } from '../tools/kimi_model.mjs';
+import { inspectSafetensorsFile, inspectLocalKimiModel, verifyKimiShardHashes, inspectKimiConfiguration } from '../tools/kimi_model.mjs';
 import {
   parseKimiArgs, buildVllmArgs, offlineVllmEnv, launchLocalKimi, KIMI_ALIAS
 } from '../tools/kimi_local.mjs';
@@ -21,7 +21,13 @@ async function fixture(type='kimi_vl', configPatch={}) {
   const dir = await mkdtemp(join(tmpdir(),'sol0-kimi-test-'));
   await writeFile(join(dir,'config.json'), JSON.stringify({
     model_type:type,
-    architectures:type==='qwen2'?['Qwen2ForCausalLM']:['KimiVLForConditionalGeneration'],
+    architectures:[({
+      qwen2:'Qwen2ForCausalLM',
+      kimi_vl:'KimiVLForConditionalGeneration',
+      kimi_k2:'DeepseekV3ForCausalLM',
+      kimi_k25:'KimiK25ForConditionalGeneration',
+      kimi_linear:'KimiLinearForCausalLM'
+    })[type] ?? 'UnknownForCausalLM'],
     ...configPatch
   }));
   await writeFile(join(dir,'model-00001.safetensors'),safetensors());
@@ -92,7 +98,7 @@ test('Kimi inspection rejects unrelated architecture, invalid config and missing
     await assert.rejects(inspectLocalKimiModel(dir),/not recognized/);
     await writeFile(join(dir,'config.json'), '{not json');
     await assert.rejects(inspectLocalKimiModel(dir),/JSON/);
-    await writeFile(join(dir,'config.json'),JSON.stringify({model_type:'kimi_vl'}));
+    await writeFile(join(dir,'config.json'),JSON.stringify({model_type:'kimi_vl',architectures:['KimiVLForConditionalGeneration']}));
     await rm(join(dir,'model-00001.safetensors'));
     await assert.rejects(inspectLocalKimiModel(dir),/safetensors shards/);
   } finally {await rm(dir,{recursive:true,force:true});}
@@ -221,4 +227,34 @@ test('sliced loading: Kimi CPU offload is bounded, explicit and disabled by defa
   for(const value of ['-1','NaN','Infinity','1025','4.123','abc']) {
     assert.throws(()=>parseKimiArgs(['--model-dir=/tmp/Kimi','--cpu-offload-gb='+value]),/(nonnegative|safe range)/);
   }
+});
+
+
+test('publisher Kimi configurations can be assessed without weight downloads', () => {
+  const models=[
+    ['kimi_vl','KimiVLForConditionalGeneration'],
+    ['kimi_k2','DeepseekV3ForCausalLM'],
+    ['kimi_k25','KimiK25ForConditionalGeneration'],
+    ['kimi_linear','KimiLinearForCausalLM']
+  ];
+  for (const [model_type,architecture] of models){
+    const meta=inspectKimiConfiguration({
+      model_type,architectures:[architecture],
+      auto_map:{AutoConfig:'trusted.publisher.Module'},
+      num_hidden_layers:27,n_routed_experts:64,num_experts_per_tok:6
+    });
+    assert.equal(meta.modelType,model_type);
+    assert.equal(meta.architecture,architecture);
+    assert.equal(meta.weightsLoaded,false);
+    assert.equal(meta.textInferenceVerified,false);
+    assert.equal(meta.routedExperts,64);
+    assert.equal(meta.activeExpertsPerToken,6);
+    assert.equal(meta.requiresCustomCode,true);
+  }
+  assert.throws(()=>inspectKimiConfiguration({model_type:'qwen2',architectures:['Qwen2ForCausalLM']}),/Kimi-Dev/);
+  assert.equal(inspectKimiConfiguration({model_type:'qwen2',architectures:['Qwen2ForCausalLM']},
+    {family:'kimi-dev'}).family,'kimi-dev');
+  assert.throws(()=>inspectKimiConfiguration({model_type:'kimi_vl',architectures:[]}),/architecture/);
+  assert.throws(()=>inspectKimiConfiguration({model_type:'kimi_k2',architectures:['DeepseekV3ForCausalLM'],
+    n_routed_experts:8,num_experts_per_tok:9}),/expert count/);
 });

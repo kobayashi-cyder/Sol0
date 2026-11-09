@@ -29,6 +29,17 @@
 
 Kimi-VL/LinearのライセンスとKimi-K2系のModified MIT、Kimi-DevのベースとなるQwen LICENSE AGREEMENTは**モデルごとに異なる**。独立して配布条件を確認する。単純に「Kimi全体はMIT」とは扱わない。
 
+## 公式モデルの構造確認（重みなしで実行可能）
+
+まず\`config.json\`だけを取得し、推論に必要な重みを読み込まずにmodel_type、アーキテクチャ、専門家数を検査できる。これはユーザー提供ファイルを解析するコマンドで、モデルのコードは一切実行しない。
+
+~~~sh
+node tools/kimi_config_probe.mjs \
+  --config=/path/to/config.json --expect=kimi_k2
+~~~
+
+Kimi-Dev-72Bの場合は \`--expect=qwen2 --family=kimi-dev\` を明示する。GitHub Actionsの \`kimi-official-config-smoke\` では、公式配布元のKimi-VL-A3B、Kimi-Linear-48B、Kimi-K2、Kimi-K2.5、Kimi-Dev-72Bの5種類のconfig.jsonを取得し、同じローカルパーサーで検証する。**これは実Kimiの重み・GPU・文章生成を一切検証しない**。配布元config.jsonはmainを参照するため、公式側の変更によって将来の結果が変わる可能性がある。
+
 ## 起動手順
 
 必要なもの：Node.js 22以上、vLLMが実行可能なPC/Linux/GPU、完全に取得済みの対応Kimi safetensorsディレクトリ。配布元から手動でダウンロードし、Gitへ入れない。

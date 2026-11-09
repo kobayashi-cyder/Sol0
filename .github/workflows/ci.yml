@@ -25,6 +25,8 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check pytest
           python -m pytest -q tests/test_weight_store.py
+      - name: Unit-test local model RSS benchmark controls
+        run: python -m unittest discover -s tests -p test_qwen_benchmark.py -v
       - name: Build single-file offline HTML
         run: python scripts/build_standalone.py
       - name: Assert offline bundle contains code and media engines
@@ -144,3 +146,226 @@ jobs:
               --model=sol0-qwen --case="$case_id"
           done
           echo 'Real official Qwen inference and public capability probes finished; no weights exported.'
+
+  # This job deliberately deletes the complete GGUF before rerunning the
+  # quantized weight kernel to prove it can compute from verified chunks alone.
+  # It does NOT claim to perform a full Transformer forward pass.
+  qwen-lazy-tensor-e2e:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Obtain official Qwen GGUF with pinned digest
+        run: |
+          curl --fail --location --retry 3 --max-time 600 --output /tmp/sol0-lazy-qwen.gguf \
+            https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+          echo '9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031  /tmp/sol0-lazy-qwen.gguf' | sha256sum --check
+      - name: Partition official GGUF and verify native quantized kernel
+        run: |
+          node tools/model_chunks.mjs split \
+            --input=/tmp/sol0-lazy-qwen.gguf \
+            --out=/tmp/sol0-lazy-qwen-slices \
+            --chunk-bytes=8388608
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            > /tmp/sol0-lazy-first.json
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            --row=0 > /tmp/sol0-lazy-row-first.json
+          python - <<'PY'
+          import json, math, struct
+          with open('/tmp/sol0-lazy-first.json', encoding='utf-8') as f:
+              result=json.load(f)
+          with open('/tmp/sol0-lazy-qwen.gguf','rb') as f:
+              f.seek(result['sourceOffset'])
+              data=f.read(34)
+          assert len(data)==34
+          scale=struct.unpack('<e',data[:2])[0]
+          weights=struct.unpack('32b',data[2:])
+          reference=sum(scale*w for w in weights)
+          assert math.isclose(reference,result['numericDot'],rel_tol=1e-5,abs_tol=1e-4), (reference,result)
+          assert result['modelArchitecture'].startswith('qwen')
+          assert result['uniqueChunksRead'] < result['chunksAvailable'], result
+          assert result['diskReassembly'] is False and result['wholeModelRun'] is False
+          print('Qwen quantized kernel matches independent original-file calculation:',reference)
+          print('Parts touched:',result['uniqueChunksRead'],'/',result['chunksAvailable'])
+          with open('/tmp/sol0-lazy-row-first.json',encoding='utf-8') as f:
+              row=json.load(f)
+          assert 32 <= row['rowColumns'] <= 32768
+          byte_count=row['rowColumns']//32*34
+          with open('/tmp/sol0-lazy-qwen.gguf','rb') as f:
+              f.seek(row['sourceOffset'])
+              payload=f.read(byte_count)
+          assert len(payload)==byte_count
+          row_reference=0
+          for i in range(row['rowColumns']//32):
+              block=payload[i*34:(i+1)*34]
+              scale=struct.unpack('<e',block[:2])[0]
+              row_reference+=sum(scale*w for w in struct.unpack('32b',block[2:]))
+          assert math.isclose(row_reference,row['numericDot'],rel_tol=1e-5,abs_tol=1e-4),(row_reference,row)
+          assert row['uniqueChunksRead'] < row['chunksAvailable']
+          print('Full Qwen Q8 neuron row matches independent original-file calculation:',row_reference)
+          PY
+      - name: Delete original complete GGUF then compute again solely from slices
+        run: |
+          rm /tmp/sol0-lazy-qwen.gguf
+          test ! -f /tmp/sol0-lazy-qwen.gguf
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            > /tmp/sol0-lazy-no-original.json
+          node tools/lazy_gguf_probe.mjs \
+            --manifest=/tmp/sol0-lazy-qwen-slices/manifest.json \
+            --expected-sha256=9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031 \
+            --row=0 > /tmp/sol0-lazy-row-no-original.json
+          python - <<'PY'
+          import json
+          with open('/tmp/sol0-lazy-first.json',encoding='utf-8') as f:
+              before=json.load(f)
+          with open('/tmp/sol0-lazy-no-original.json',encoding='utf-8') as f:
+              after=json.load(f)
+          assert before==after,(before,after)
+          assert after['uniqueChunksRead'] < after['chunksAvailable']
+          with open('/tmp/sol0-lazy-row-first.json',encoding='utf-8') as f:
+              row_before=json.load(f)
+          with open('/tmp/sol0-lazy-row-no-original.json',encoding='utf-8') as f:
+              row_after=json.load(f)
+          assert row_before==row_after,(row_before,row_after)
+          print('Success: Qwen Q8 full-row weight calculation from verified chunks with zero reconstructed model files')
+          PY
+
+  # Complete text inference from native tensor-sharded GGUF with no joined
+  # model file. llama.cpp still computes every necessary layer and requires RAM.
+  # Independent of the low-level Node Q8 slice arithmetic prototype above.
+  qwen-sharded-generation-e2e:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build pinned offline llama.cpp split tool and server
+        run: |
+          git clone --depth 1 --branch b12135 https://github.com/ggml-org/llama.cpp.git /tmp/sol0-shard-llama
+          cmake -S /tmp/sol0-shard-llama -B /tmp/sol0-shard-build \
+            -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DGGML_NATIVE=OFF
+          cmake --build /tmp/sol0-shard-build \
+            --target llama-gguf-split llama-server --parallel 2
+      - name: Download official Qwen model and verify complete publisher SHA256
+        run: |
+          curl --fail --location --retry 3 --max-time 600 \
+            --output /tmp/sol0-shard-source.gguf \
+            https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
+          echo '9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031  /tmp/sol0-shard-source.gguf' | sha256sum --check
+      - name: Split GGUF by tensor, preserve source for comparison
+        run: |
+          mkdir /tmp/sol0-native-shards
+          /tmp/sol0-shard-build/bin/llama-gguf-split --split-max-tensors 32 \
+            /tmp/sol0-shard-source.gguf /tmp/sol0-native-shards/qwen3-q8
+          count=$(find /tmp/sol0-native-shards -maxdepth 1 -type f -name '*.gguf' | wc -l)
+          test "$count" -ge 2
+          find /tmp/sol0-native-shards -maxdepth 1 -type f -name '*.gguf' -print0 \
+            | sort -z | xargs -0 sha256sum > /tmp/sol0-native-shard-checksums
+          (cd / && sha256sum --check /tmp/sol0-native-shard-checksums)
+          first=$(find /tmp/sol0-native-shards -maxdepth 1 -type f -name '*-00001-of-*.gguf' | head -n 1)
+          test -n "$first"
+          test -f "$first"
+          echo "$first" > /tmp/sol0-first-native-shard-path
+          echo "Native tensor-aligned GGUF shards: $count; no joined model file exists"
+      - name: Benchmark original and native-sharded Qwen CPU RSS and response latency
+        run: |
+          python scripts/benchmark_qwen_shards.py \
+            --original=/tmp/sol0-shard-source.gguf \
+            --shard-first="$(cat /tmp/sol0-first-native-shard-path)" \
+            --runner=/tmp/sol0-shard-build/bin/llama-server \
+            --output=/tmp/sol0-qwen-resources.json --repetitions=2
+          python - <<'PY'
+          import json
+          with open('/tmp/sol0-qwen-resources.json',encoding='utf-8') as f:
+              data=json.load(f)
+          assert len(data['conditions'])==2
+          for record in data['conditions']:
+              assert record['peakProcessRssMiB']>0,record
+              assert record['medianRequestMs']>=0,record
+              assert record['fallback'] is False,record
+          print('Both modes generated actual Sol0 replies; RAM results are measurements, not claims of reduction')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sol0-Qwen-single-vs-sharded-resource-metrics
+          path: /tmp/sol0-qwen-resources.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Delete original single GGUF after benchmark (ephemeral CI only)
+        run: |
+          rm /tmp/sol0-shard-source.gguf
+          test ! -e /tmp/sol0-shard-source.gguf
+      - name: Generate an actual Qwen answer using native shards through Sol0
+        run: |
+          first=$(cat /tmp/sol0-first-native-shard-path)
+          test -f "$first"
+          test ! -e /tmp/sol0-shard-source.gguf
+          node tools/qwen_local.mjs --model="$first" \
+            --runner=/tmp/sol0-shard-build/bin/llama-server \
+            > /tmp/sol0-native-sharded-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 150); do
+            if curl --silent --fail --max-time 2 http://127.0.0.1:9931/health | grep -q '"status":"ok"'; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              tail -n 100 /tmp/sol0-native-sharded-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            tail -n 100 /tmp/sol0-native-sharded-server.log
+            echo 'Tensor-sharded Qwen did not become ready'
+            exit 1
+          fi
+          node tools/local_model_smoke.mjs --consent \
+            --endpoint=http://127.0.0.1:9931/v1/chat/completions \
+            --model=sol0-qwen
+          echo 'SUCCESS: native-shard Qwen generated text through Sol0 without GGUF merge'
+
+  # Actual publisher CONFIG check, never a claim of Kimi weight inference.
+  # Only small config.json files; no pretrained weights or untrusted Python.
+  kimi-official-config-smoke:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify actual Moonshot model architectures from config.json only
+        run: |
+          set -euo pipefail
+          while IFS=: read -r model expected family; do
+            target="/tmp/sol0-kimi-$expected.json"
+            curl --fail --silent --show-error --location --retry 2 --max-time 60 \
+              --output "$target" \
+              "https://huggingface.co/moonshotai/$model/resolve/main/config.json"
+            node tools/kimi_config_probe.mjs \
+              --config="$target" --expect="$expected" --family="$family"
+          done <<'KIMI_MODELS'
+          Kimi-VL-A3B-Instruct:kimi_vl:auto
+          Kimi-Linear-48B-A3B-Instruct:kimi_linear:auto
+          Kimi-K2-Instruct:kimi_k2:auto
+          Kimi-K2.5:kimi_k25:auto
+          Kimi-Dev-72B:qwen2:kimi-dev
+          KIMI_MODELS
+          echo 'Official Kimi config structures validated; NO pretrained weights loaded or inference run'
