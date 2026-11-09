@@ -13,6 +13,7 @@ diagnose() {
   if ((status != 0)); then
     echo "Android smoke failed: exit $status"
     adb devices -l || true
+    adb shell dumpsys webviewupdate || true
     adb shell dumpsys activity activities | tail -n 110 || true
     adb logcat -d -t 900 > "$LOG" || true
     grep -A 18 -E 'FATAL EXCEPTION|AndroidRuntime|chromium|solzero' "$LOG" | tail -n 120 || true
@@ -58,4 +59,4 @@ if grep -A 15 'FATAL EXCEPTION' "$LOG" | grep -F "$PACKAGE"; then
 fi
 adb shell screencap -p /sdcard/solzero-android.png
 adb pull /sdcard/solzero-android.png /tmp/solzero-android.png
-echo "PASS: Android 15 offline WebView chat, scratch WSP, task, PNG, native Download"
+echo "PASS: Android emulator offline WebView chat, scratch WSP, task, PNG, native Download"
