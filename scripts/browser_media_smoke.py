@@ -6,7 +6,7 @@ from browser_server import serve_root
 
 ROOT=Path(__file__).resolve().parents[1]
 
-def persisted_asset_ids(page):
+def persisted_asset_snapshot(page):
     return page.evaluate("""async () => {
         const db = await new Promise((resolve, reject) => {
             const open = indexedDB.open('solzero_media_v012');
@@ -14,11 +14,15 @@ def persisted_asset_ids(page):
             open.onerror = () => reject(open.error);
         });
         try {
-            return await new Promise((resolve, reject) => {
-                const read = db.transaction('assets').objectStore('assets').getAllKeys();
+            const assets = await new Promise((resolve, reject) => {
+                const read = db.transaction('assets').objectStore('assets').getAll();
                 read.onsuccess = () => resolve(read.result);
                 read.onerror = () => reject(read.error);
             });
+            return await Promise.all(assets.map(async ({bytes, ...asset}) => ({
+                ...asset,
+                bytesSha256: Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))),
+            })));
         } finally {
             db.close();
         }
@@ -70,8 +74,8 @@ def run():
 
             # Queue one replacement, then cause a native synchronous DataError
             # after clear(). Reload to verify IndexedDB rolled back both writes.
-            original_ids=persisted_asset_ids(page)
-            assert len(original_ids)==4
+            original_assets=persisted_asset_snapshot(page)
+            assert len(original_assets)==4
             page.evaluate("""() => {
                 const put = IDBObjectStore.prototype.put;
                 window.__mediaRestoreWrites = 0;
@@ -90,8 +94,8 @@ def run():
             assert page.evaluate('window.__mediaRestoreWrites')==2
             page.reload(wait_until='load')
             page.locator('#studioBtn').click(force=True)
-            expect(page.locator('#panelBody .listentry b')).to_have_count(len(original_ids))
-            assert persisted_asset_ids(page)==original_ids
+            expect(page.locator('#panelBody .listentry b')).to_have_count(len(original_assets))
+            assert persisted_asset_snapshot(page)==original_assets
 
             picker.set_input_files(str(good))
             page.wait_for_function("() => document.querySelector('#panelBody .listentry')?.textContent.includes('作品復元完了：')",timeout=10000)
