@@ -85,7 +85,7 @@ jobs:
   # to the ephemeral CI runner, verified by SHA256, and never uploaded/artifacted.
   # Not a required job for ordinary Sol0 or Android PRs.
   qwen-real-e2e:
-    if: github.event_name == 'pull_request' && github.head_ref == 'feat/kimi-local-vllm-20261109'
+    if: github.event_name == 'pull_request' && (github.head_ref == 'feat/kimi-local-vllm-20261109' || github.head_ref == 'fix/integrate-atomic-import-and-local-models-20261109')
     runs-on: ubuntu-latest
     timeout-minutes: 22
     steps:
@@ -153,7 +153,7 @@ jobs:
   # quantized weight kernel to prove it can compute from verified chunks alone.
   # It does NOT claim to perform a full Transformer forward pass.
   qwen-lazy-tensor-e2e:
-    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    if: github.event_name == 'pull_request' && (github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109' || github.head_ref == 'fix/integrate-atomic-import-and-local-models-20261109')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -246,7 +246,7 @@ jobs:
   # model file. llama.cpp still computes every necessary layer and requires RAM.
   # Independent of the low-level Node Q8 slice arithmetic prototype above.
   qwen-sharded-generation-e2e:
-    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    if: github.event_name == 'pull_request' && (github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109' || github.head_ref == 'fix/integrate-atomic-import-and-local-models-20261109')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -345,7 +345,7 @@ jobs:
   # Actual publisher CONFIG check, never a claim of Kimi weight inference.
   # Only small config.json files; no pretrained weights or untrusted Python.
   kimi-official-config-smoke:
-    if: github.event_name == 'pull_request' && github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109'
+    if: github.event_name == 'pull_request' && (github.head_ref == 'feat/lazy-gguf-tensor-slices-20261109' || github.head_ref == 'fix/integrate-atomic-import-and-local-models-20261109')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
