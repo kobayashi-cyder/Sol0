@@ -29,8 +29,9 @@ function harness({failPut=false,failAbort=false}={}){
  const replace=vm.runInNewContext(fnSource+'\nreplaceAssetsTransaction',context);
  async function run(assets){
   const result=replace(assets);
-  // Let the awaited studioDB() continuation create the transaction first.
-  await Promise.resolve();
+  // Cross the event-loop turn so the VM async function has created its transaction.
+  // A single Promise.resolve() races with its nested await continuation.
+  await new Promise(resolve=>setImmediate(resolve));
   // Simulate IndexedDB's asynchronous commit if the transaction was not aborted.
   queueMicrotask(()=>{if(working!==null){persisted=structuredClone(working);commits++;tx.oncomplete?.();}});
   return await result;
