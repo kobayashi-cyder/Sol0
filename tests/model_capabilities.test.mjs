@@ -60,3 +60,33 @@ test('capability comparison does not label human-review tasks as automatic succe
   assert.equal(result.exactMatch,null);
   assert.equal(result.reviewStatus,'unreviewed');
 });
+
+test('an empty Qwen answer is reported as failed quality, not a fake passing reply',async()=>{
+  const opts=parseCapabilityArgs([
+    '--consent','--endpoint=http://127.0.0.1:9931/v1/chat/completions',
+    '--model=sol0-qwen','--case=translation'
+  ]);
+  const empty=async()=>({
+    ok:true,headers:new Headers(),body:null,
+    text:async()=>JSON.stringify({choices:[{message:{content:''}}]})
+  });
+  const result=await evaluateOneCapability(opts,{fetchImpl:empty});
+  assert.equal(result.outcome,'empty-response');
+  assert.equal(result.response,'');
+  assert.equal(result.exactMatch,null);
+  assert.equal(result.reviewStatus,'needs-review');
+  const exact=await evaluateOneCapability({...opts,caseId:'arithmetic'},{fetchImpl:empty});
+  assert.equal(exact.exactMatch,false);
+});
+
+test('a real connection or HTTP failure still fails the capability evaluation',async()=>{
+  const opts=parseCapabilityArgs([
+    '--consent','--endpoint=http://127.0.0.1:9931/v1/chat/completions',
+    '--model=sol0-qwen','--case=translation'
+  ]);
+  const unavailable=async()=>({ok:false,status:503,headers:new Headers()});
+  await assert.rejects(evaluateOneCapability(opts,{fetchImpl:unavailable}),
+    /Model server rejected/);
+  const broken=async()=>{throw new TypeError('connection refused');};
+  await assert.rejects(evaluateOneCapability(opts,{fetchImpl:broken}),/connection refused/);
+});
