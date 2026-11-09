@@ -1,6 +1,7 @@
 /** Unified offline media workspace for Sol-Zero. No external AI/services. */
 import {MEDIA_LIMITS,validateMediaSpec,renderMediaScene,audioSpec,synthSamples,wavBytes,rgbaToIndex,gifBytes,zipBytes,unzipStored,MediaWSP} from './media_studio.js';
 import {mountMaterialLab} from './material_lab_ui.js';
+import {mountCooperativeLab} from './cooperative_lab_ui.js';
 const STORE='solzero_studio_v012_recipe',DB_NAME='solzero_media_v012';
 function element(tag,txt){const x=document.createElement(tag);if(txt!==undefined)x.textContent=txt;return x;}
 function mimeFor(name){const ext=name.toLowerCase().split('.').pop();return ({png:'image/png',gif:'image/gif',jpg:'image/jpeg',jpeg:'image/jpeg',wav:'audio/wav',mp3:'audio/mpeg',webm:'video/webm',mp4:'video/mp4'})[ext]||null;}
@@ -284,6 +285,7 @@ export class MediaStudio {
   undo.addEventListener('click',()=>{if(this.uiBusy||this.busy)return;this.wsp.rollback();this.saveRecipe();reportRefresh();});ww.append(edit,undo);root.append(report);reportRefresh();
   root.append(element('h3','作品に含まれる素材（最大16件／合計55MB）'));const list=element('div');root.append(list);this.drawAssets(list,notify);
   mountMaterialLab(this,root,{notify,refresh:()=>this.render(root,helpers)});
+  mountCooperativeLab(this,root,{notify,refreshAssets:()=>this.drawAssets(list,notify)});
  }
  drawAssets(root,notify){for(const url of this.previewUrls)URL.revokeObjectURL(url);this.previewUrls.clear();root.replaceChildren();const total=this.assets.reduce((s,a)=>s+a.bytes.length,0);root.append(element('p',`${this.assets.length}件・${(total/1024/1024).toFixed(2)} MiB。画像・音声・動画を同じプロジェクトとしてZIPに保存できます。`));
   for(const a of this.assets){const entry=element('div');entry.className='listentry';entry.append(element('b',`${a.kind}: ${a.name} (${Math.round(a.bytes.length/1024)}KB)`));const blob=new Blob([a.bytes],{type:a.type}),url=URL.createObjectURL(blob);this.previewUrls.add(url);const media=a.type.startsWith('image/')?element('img'):a.type.startsWith('audio/')?element('audio'):a.type.startsWith('video/')?element('video'):null;

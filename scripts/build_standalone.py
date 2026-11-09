@@ -23,6 +23,29 @@ media_studio = (ROOT / 'chat_web' / 'media_studio.js').read_text(encoding='utf-8
 media_ui = (ROOT / 'chat_web' / 'media_ui.js').read_text(encoding='utf-8')
 material_wsp = (ROOT / 'chat_web' / 'wsp_materials.js').read_text(encoding='utf-8')
 material_lab_ui = (ROOT / 'chat_web' / 'material_lab_ui.js').read_text(encoding='utf-8')
+
+# Strict and scoped bundling: each cooperative module gets its own IIFE to avoid
+# collisions with legacy WSP names or with other module-private identifiers.
+def wrap_cooperative_module(filename, exported):
+    source = (ROOT / 'chat_web' / filename).read_text(encoding='utf-8')
+    source = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"][^'\"]+['\"];?\s*$", '', source, flags=re.MULTILINE)
+    source = re.sub(r'\bexport\s+(?=(?:async\s+)?(?:const|class|function)\b)', '', source)
+    assert not re.search(r'^\s*(?:import|export)\b', source, flags=re.MULTILINE), filename
+    assert '</script' not in source.lower(), filename
+    names = ','.join(exported)
+    return '\nconst {' + names + '} = (() => {\n' + source + '\nreturn {' + names + '};\n})();\n'
+
+cooperative_modules = '\n'.join(wrap_cooperative_module(filename, exports) for filename, exports in [
+    ('wsp_scene.js', ['SCENE_LIMITS','SCENE_FIELDS','createScene','validateScene','cloneScene','clearScene','mergeProposal','renderSceneToRGBA']),
+    ('wsp_router.js', ['COOP_SHAPES','COOP_LIGHTS','COOP_EXPERTS','ROUTER_FEATURES','validateCoopSpec','features','CooperativeWSP','routeExperts']),
+    ('wsp_shape_expert.js', ['applyShapeExpert']),
+    ('wsp_material_expert.js', ['applyMaterialExpert']),
+    ('wsp_lighting_expert.js', ['applyLightingExpert']),
+    ('wsp_detail_expert.js', ['applyDetailExpert']),
+    ('wsp_critic.js', ['evaluateScene']),
+    ('wsp_cooperative_generator.js', ['generateCooperativeImage']),
+    ('cooperative_lab_ui.js', ['mountCooperativeLab']),
+])
 bigram = re.sub(r'\bexport (const|class|function)\b', r'\1', bigram)
 wsp_bulk = re.sub(r'\bexport (const|class|function)\b', r'\1', wsp_bulk)
 wsp_flow = re.sub(r'\bexport (const|class|function)\b', r'\1', wsp_flow)
@@ -45,6 +68,7 @@ material_lab_ui = '\nconst {mountMaterialLab} = (() => {\n' + material_lab_ui + 
 media_ui = re.sub(r'\bexport (const|class|function)\b', r'\1', media_ui)
 media_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./media_studio\.js['\"];?\s*$", '', media_ui, flags=re.MULTILINE)
 media_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./material_lab_ui\.js['\"];?\s*$", '', media_ui, flags=re.MULTILINE)
+media_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./cooperative_lab_ui\.js['\"];?\s*$", '', media_ui, flags=re.MULTILINE)
 code_workshop = re.sub(r'\bexport (const|class|function)\b', r'\1', code_workshop)
 task_agent = re.sub(r'\bexport (const|class|function|async function)\b', r'\1', task_agent)
 task_agent = '\nconst {TASK_AGENT_LIMITS,TASK_AGENT_TOOLS,TASK_AGENT_DEMO,validateTaskPlan,runTaskPlan,runTaskPlanAsync,taskAgentHelp} = (() => {\n' + task_agent + '\nreturn {TASK_AGENT_LIMITS,TASK_AGENT_TOOLS,TASK_AGENT_DEMO,validateTaskPlan,runTaskPlan,runTaskPlanAsync,taskAgentHelp};\n})();\n'
@@ -73,7 +97,7 @@ app = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./media_ui\.js['\"];?\s*$", 
 assert not re.search(r'(?<![a-z])import\s+\{', app)
 assert '</script' not in (task_agent + wsp_neural + banc_cognition + code_workshop + wsp_codegen + engine + bigram + wsp_bulk + wsp_flow + wsp_auto + wsp_factory + app).lower()
 bundle = ui.replace('<script type="module" src="./app.js"></script>',
-                    '<script type="module">\n' + learned_router + '\n' + code_workshop + '\n' + task_agent + '\n' + wsp_neural + '\n' + banc_cognition + '\n' + engine + '\n' + bigram + '\n' + wsp_bulk + '\n' + wsp_flow + '\n' + wsp_auto + '\n' + wsp_graph + '\n' + wsp_codegen + '\n' + wsp_factory + '\n' + wsp_induction + '\n' + media_studio + '\n' + material_wsp + '\n' + material_lab_ui + '\n' + media_ui + '\n' + app + '\n</script>')
+                    '<script type="module">\n' + learned_router + '\n' + code_workshop + '\n' + task_agent + '\n' + wsp_neural + '\n' + banc_cognition + '\n' + engine + '\n' + bigram + '\n' + wsp_bulk + '\n' + wsp_flow + '\n' + wsp_auto + '\n' + wsp_graph + '\n' + wsp_codegen + '\n' + wsp_factory + '\n' + wsp_induction + '\n' + media_studio + '\n' + material_wsp + '\n' + material_lab_ui + '\n' + cooperative_modules + '\n' + media_ui + '\n' + app + '\n</script>')
 assert 'src="./app.js"' not in bundle
 path = ROOT / 'SolZero_Chat_Offline.html'
 path.write_text(bundle, encoding='utf-8')

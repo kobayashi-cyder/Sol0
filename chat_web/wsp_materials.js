@@ -133,6 +133,12 @@ export class MaterialWSP {
   this.model=next;
   return {material,examples:this.model.experts[material].seen,patches:patches.length,weights};
  }
+ sampleTexture(material,raw={}){
+  assertMaterial(material);const expert=this.model.experts[material];
+  if(!expert)fail('未学習の材質です。参考画像を取り込んでください');
+  const {width,height,seed}=validateOptions({...raw,shape:'plane'});
+  return {width,height,data:quilt(expert.patches,expert.weights,width,height,seed),material};
+ }
  render(material,raw={}){
   assertMaterial(material);const expert=this.model.experts[material];
   if(!expert)fail('未学習の材質です。参考画像を取り込んでください');

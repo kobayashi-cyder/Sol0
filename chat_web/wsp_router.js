@@ -38,7 +38,7 @@ export class CooperativeWSP {
  constructor(){this.bias=[1.1,1,.9,.45];this.weights=Array.from({length:4},()=>Array(ROUTER_FEATURES).fill(0));this.history=[];}
  snapshot(){return {version:1,bias:[...this.bias],weights:this.weights.map(row=>[...row])};}
  restore(model){if(!modelValid(model))return false;this.bias=[...model.bias];this.weights=model.weights.map(row=>[...row]);this.history=[];return true;}
- rollback(){const old=this.history.pop();return old?this.restore(old):false;}
+ rollback(){const old=this.history.pop();if(!old)return false;this.bias=[...old.bias];this.weights=old.weights.map(x=>[...x]);return true;}
  route(raw){
   const x=features(raw),out={};
   COOP_EXPERTS.forEach((name,k)=>{

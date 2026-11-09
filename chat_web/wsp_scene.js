@@ -32,10 +32,7 @@ export function mergeProposal(scene,proposal,strength=1,refineMask=null){
  const n=scene.width*scene.height,confidence=proposal.confidence;
  if(!(confidence instanceof Float32Array)||confidence.length!==n)throw Error('WSP proposal confidence invalid');
  if(refineMask!==null&&(!(refineMask instanceof Uint8Array)||refineMask.length!==n))throw Error('WSP refinement mask invalid');
- if(proposal.mask!==undefined){
-  if(!(proposal.mask instanceof Uint8Array)||proposal.mask.length!==n)throw Error('WSP mask invalid');
-  scene.mask.set(proposal.mask);
- }
+ if(proposal.mask!==undefined&&(!(proposal.mask instanceof Uint8Array)||proposal.mask.length!==n))throw Error('WSP mask invalid');
  const entries=SCENE_FIELDS.filter(k=>k!=='confidence'&&proposal[k]!==undefined);
  for(const key of entries)if(!(proposal[key] instanceof Float32Array)||proposal[key].length!==n)throw Error('WSP proposal channel invalid: '+key);
  // Validation before any state mutation, not a partial update on malformed values.
@@ -43,6 +40,7 @@ export function mergeProposal(scene,proposal,strength=1,refineMask=null){
   if(!Number.isFinite(confidence[p])||confidence[p]<0||confidence[p]>1)throw Error('WSP confidence outside bounds');
   for(const key of entries)if(!Number.isFinite(proposal[key][p]))throw Error('WSP proposal nonfinite');
  }
+ if(proposal.mask!==undefined)scene.mask.set(proposal.mask);
  for(let p=0;p<n;p++){
   const alpha=strength*confidence[p]*(refineMask?(refineMask[p]?.92:.18):1);
   for(const key of entries){

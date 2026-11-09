@@ -84,7 +84,7 @@ export function mountCooperativeLab(studio,root,helpers={}){
   status.textContent='協調生成保存：'+asset.name+' / '+result.stepsUsed+'回評価';
   score.textContent='内部評価 '+result.report.total.toFixed(4)+' / パッチ境界 '+result.report.seamScore.toFixed(4)+' / 最良反復 '+result.bestIteration;
   helpers.notify?.('WSP協調生成を作品に保存しました');
-  helpers.refresh?.();
+  helpers.refreshAssets?.();
  }));
  makeButton(actions,'自動微調整重みを採用',()=>operate(async()=>{
   if(!last)throw Error('先に協調生成してください');
