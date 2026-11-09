@@ -204,7 +204,9 @@ test('generic chat response accepts bounded text parts from compatible servers',
     { type: 'text', text: 'x'.repeat(INFERENCE_LIMITS.outputChars + 1) }
   ] } }] }), /bounded/);
   assert.throws(() => normalizeChatContent({ choices: [{ message: { content: [] } }] }), /Unsupported/);
-  assert.throws(() => normalizeChatContent({ choices: [{ message: { content: null } }] }), /Unsupported/);
+  // Missing text must retain the pre-existing bounded-output error contract.
+  assert.throws(() => normalizeChatContent({ choices: [{ message: { content: null } }] }), /bounded/);
+  assert.throws(() => normalizeChatContent({ choices: [{ message: {} }] }), /bounded/);
 });
 
 test('generic HTTP adapter normalizes text parts without sending history', async () => {
