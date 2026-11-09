@@ -22,6 +22,14 @@ trap diagnose EXIT
 
 test -s "$APK"
 adb wait-for-device
+if [[ -n "${EXPECTED_ANDROID_API:-}" ]]; then
+  actual_api="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+  if [[ "$actual_api" != "$EXPECTED_ANDROID_API" ]]; then
+    echo "Wrong Android API: expected $EXPECTED_ANDROID_API, actual $actual_api"
+    exit 1
+  fi
+  echo "PASS: Android emulator API $actual_api verified"
+fi
 adb install -r "$APK"
 adb shell am start -W -n "$ACTIVITY"
 
