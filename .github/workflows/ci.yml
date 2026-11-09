@@ -76,6 +76,8 @@ jobs:
         run: python scripts/browser_task_agent_smoke.py
       - name: Multiline input and explicit send regression
         run: python scripts/browser_input_smoke.py
+      - name: Atomic WSP backup restore and quota rejection with real Chromium UI
+        run: python scripts/browser_backup_smoke.py
       - name: Opt-in LLM UI and per-message consent (mock network)
         run: python scripts/browser_model_smoke.py
 
