@@ -58,7 +58,7 @@ function colorNear(text,start,end,kind){
 }
 function positionNear(text,start,end){
  const before=text.slice(Math.max(0,start-14),start).split(/[。、，,;；]/).at(-1);
- const after=text.slice(end,Math.min(text.length,end+12)).split(/[。、，,;；]/)[0];
+ const after=text.slice(end,Math.min(text.length,end+24)).split(/[。、，,;；]/)[0];
  const phrase=before+' '+after;
  if(/左側|左手|左に|左の|left/i.test(phrase))return 'left';
  if(/右側|右手|右に|右の|right/i.test(phrase))return 'right';
