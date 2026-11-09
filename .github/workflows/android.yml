@@ -133,6 +133,7 @@ jobs:
         env:
           EXPECTED_ANDROID_API: '37'
         with:
+          channel: canary
           api-level: 37
           arch: x86_64
           target: google_apis
