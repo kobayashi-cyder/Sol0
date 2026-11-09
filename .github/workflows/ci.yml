@@ -74,3 +74,5 @@ jobs:
         run: python scripts/browser_task_agent_smoke.py
       - name: Multiline input and explicit send regression
         run: python scripts/browser_input_smoke.py
+      - name: Backup import atomicity and quota regression in headless Chromium
+        run: python scripts/browser_backup_smoke.py
