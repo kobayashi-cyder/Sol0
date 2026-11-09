@@ -212,3 +212,35 @@ test('validated import commits storage and live chat once after user approval',a
  assert.match(notices.at(-1),/復元しました/);
  assert.equal(event.target.value,'');
 });
+
+test('3.4MB storage boundary refuses valid 3.5MB import without touching chats, docs or WSP',async()=>{
+ const runtime=createPreparedHarness();
+ const backup=goodSnapshot();
+ backup.chats[0].messages=Array.from({length:19},(_,i)=>msg('assistant','L'.repeat(190000)+i));
+ const body=JSON.stringify(backup);
+ assert.ok(body.length>3400000&&body.length<4000000,body.length);
+ const original={schema:3,chats:[{id:'existing',messages:[msg('user','keep me')]}],
+  knowledge:[{q:'memory',a:'keep'}],documents:[{title:'media',text:'do not discard'}],
+  wsp:{marker:'keep WSP'}};
+ const persisted=JSON.stringify(original);
+ const notifications=[],writes=[];
+ const context={
+  db:original,DB_KEY:'test-key',schemaRead,
+  prepareBackupRuntime:runtime.prepareBackupRuntime,
+  confirm:()=>true,
+  localStorage:{setItem(...args){writes.push(args);}},
+  notify:m=>notifications.push(m)
+ };
+ const begin=source.indexOf('async function importJson(event){');
+ const end=source.indexOf('\nfunction changeTheme(',begin);
+ const importJson=vm.runInNewContext(source.slice(begin,end)+'\nimportJson',context,{timeout:1000});
+ const event={target:{files:[{size:body.length,text:async()=>body}],value:'selected'}};
+ await importJson(event);
+ assert.equal(writes.length,0);
+ assert.strictEqual(context.db,original);
+ assert.equal(context.db.knowledge[0].a,'keep');
+ assert.equal(context.db.documents[0].text,'do not discard');
+ assert.equal(context.db.wsp.marker,'keep WSP');
+ assert.equal(event.target.value,'');
+ assert.match(notifications.join(' '),/容量/);
+});
