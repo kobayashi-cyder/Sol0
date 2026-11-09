@@ -2922,20 +2922,75 @@ function rename(){const c=current(),name=prompt('会話名を入力してくだ�
 function download(content,name,type){const blob=new Blob([content],{type});const href=URL.createObjectURL(blob);const a=el('a');a.href=href;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),3000);}
 function exportJson(){save();download(JSON.stringify({...db,exported_at:new Date().toISOString(),app_version:ENGINE_VERSION},null,2),'solzero_v012_backup.json','application/json;charset=utf-8');sidebarClose();}
 function exportMd(){const c=current();const out=[`# ${c.title}`,'','Sol-Zero チャット記録',...c.messages.flatMap(m=>[`## ${m.role==='user'?'ユーザー':'Sol-Zero'}`,'',m.text,''])];download(out.join('\n'),'solzero_chat.md','text/markdown;charset=utf-8');sidebarClose();}
+/**
+ * Import must be a two-phase commit: validate every optional WSP snapshot in
+ * detached objects, then persist. Do not change live engines on invalid data.
+ */
+function prepareBackupRuntime(parsed){
+  const router=new engine.router.constructor();
+  if(parsed.wsp && !router.restore(parsed.wsp))throw Error('WSP router');
+  const neural=new engine.neural.constructor();
+  if(parsed.neural && !neural.restore(parsed.neural))throw Error('WSP neural');
+  const bulk=new WSPBulk();
+  if(parsed.bulk && !bulk.restore(parsed.bulk))throw Error('WSP bulk');
+  if(parsed.bulkPrevious){
+    const previous=new WSPBulk();
+    if(!previous.restore(parsed.bulkPrevious))throw Error('WSP previous bulk');
+    bulk.previous=previous.snapshot();
+  }
+  const flow=new WSPFlow();
+  if(parsed.flow && !flow.restore(parsed.flow))throw Error('WSP flow');
+  if(parsed.flowPrevious){
+    const previous=new WSPFlow();
+    if(!previous.restore(parsed.flowPrevious))throw Error('WSP previous flow');
+  }
+  const graph=new WSPGraph();
+  if(parsed.graph && !graph.restore(parsed.graph))throw Error('WSP graph');
+  if(parsed.graphHistory!=null){
+    if(!Array.isArray(parsed.graphHistory)||parsed.graphHistory.length>8)throw Error('WSP graph history');
+    for(const item of parsed.graphHistory)inspectGraph(item);
+    graph.history=parsed.graphHistory.map(item=>structuredClone(item));
+  }
+  const nextGenerator=new ScratchBigram();
+  if(parsed.generator && !nextGenerator.restore(parsed.generator))throw Error('WSP generator');
+  return {router,neural,bulk,flow,graph,generator:nextGenerator};
+}
 async function importJson(event){const file=event.target.files?.[0];event.target.value='';if(!file)return;
   if(file.size>4000000)return notify('JSONは4MB以下にしてください。');
-  const parsed=schemaRead(await file.text());if(!parsed)return notify('復元できない形式、または上限超過です。');
+  let parsed,prepared;
+  try{
+    parsed=schemaRead(await file.text());
+    if(!parsed)return notify('復元できない形式、または上限超過です。');
+    prepared=prepareBackupRuntime(parsed);
+  }catch{
+    return notify('破損したWSPまたはバックアップのため復元を中止しました。既存データは維持されています。');
+  }
   if(!confirm('現在の全会話・知識・資料をバックアップの内容で置き換えます。続けますか？'))return;
-  db=parsed;engine.router=new engine.router.constructor();if(db.wsp)engine.router.restore(db.wsp);
-  engine.neural=new engine.neural.constructor();if(db.neural&&!engine.neural.restore(db.neural))notify('復元されたWSP重みは不正です。');
-  engine.bulk=new WSPBulk();
-engine.flow=new WSPFlow();if(db.bulk&&!engine.bulk.restore(db.bulk))notify('WSP回路を検証できず読み込みを中止しました。');
-  if(db.flow&&!engine.flow.restore(db.flow))notify('状態機械を復元できませんでした。');
+  // localStorage may reject quota or disabled storage; do not change any live objects first.
+  try{
+    const payload=JSON.stringify(parsed);
+    if(payload.length>3400000)throw Error('backup exceeds storage limit');
+    localStorage.setItem(DB_KEY,payload);
+  }catch{
+    return notify('保存容量が不足しているため復元を中止しました。既存の会話は維持されています。');
+  }
+  // There are no validation or storage operations after this commit boundary.
+  db=parsed;
+  engine.router=prepared.router;
+  engine.neural=prepared.neural;
+  engine.bulk=prepared.bulk;
+  engine.flow=prepared.flow;
+  engine.graph=prepared.graph;
   engine.autoAudit=db.autoAudit;
-  generator.vocab=[];generator.weights=[];generator.steps=0;generator.events=[];if(db.generator)generator.restore(db.generator);
-  engine.graph=new WSPGraph();if(db.graph&&!engine.graph.restore(db.graph))notify('グラフ回路データの形式が不正です。');
-  if(Array.isArray(db.graphHistory))engine.graph.history=db.graphHistory.slice(-8).filter(h=>{try{inspectGraph(h);return true;}catch{return false;}});
-  document.documentElement.dataset.theme=db.theme;byId('historySearch').value='';save();draw();sidebarClose();notify('バックアップを復元しました。');
+  generator.vocab=prepared.generator.vocab;
+  generator.weights=prepared.generator.weights;
+  generator.steps=prepared.generator.steps;
+  generator.events=prepared.generator.events;
+  document.documentElement.dataset.theme=db.theme;
+  byId('historySearch').value='';
+  draw();
+  sidebarClose();
+  notify('バックアップを復元しました。');
 }
 function changeTheme(){db.theme=db.theme==='light'?'dark':'light';document.documentElement.dataset.theme=db.theme;save();sidebarClose();}
 function openPanel(which){
