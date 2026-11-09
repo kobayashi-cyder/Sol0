@@ -43,6 +43,23 @@ node tools/qwen_local.mjs \
 - バイト分割のままQ8の部分・行演算：公式Qwen3-0.6B-Q8_0.gguf 77個のバイト断片から、原本GGUFを削除してPythonの独立計算と一致する結果を取得。独立の数値演算実験（https://github.com/kobayashi-cyder/Sol0/actions/runs/42537182123）。
 - **テンソル分割による文章生成に成功**：Actions [#42537608185](https://github.com/kobayashi-cyder/Sol0/actions/runs/42537608185)で、公式Qwen3-0.6B-Q8_0のSHA256を確認し、llama-gguf-splitで10個のGGUFへテンソル分割、元の単体GGUFを削除、最初のシャードをllama-serverに渡してSol0の同意付きHTTP推論アダプター経由で日本語の回答を取得した。実HTTP応答705ms、空でない回答、WSPへのfallbackなし。モデル品質やメモリ効率の定量評価を意味しない。
 
+## メモリと速度を実測する
+
+公式Qwenモデルの単体GGUFとネイティブGGUFシャードについて、**同じllama.cpp CPUバイナリ・同じコンテキスト長・同じSol0推論アダプター**で2回ずつ文章生成を行い、サーバープロセスのRSS最大値とリクエスト時間を記録する。
+
+~~~sh
+python scripts/benchmark_qwen_shards.py \
+  --original=/models/Qwen3-0.6B-Q8_0.gguf \
+  --shard-first=/models/qwen-shards/qwen3-q8-00001-of-000NN.gguf \
+  --runner=/path/to/llama-server \
+  --output=/tmp/sol0-qwen-benchmark.json \
+  --repetitions=2
+~~~
+
+Linuxの \`/proc/<pid>/status\` を使う。ユーザー所有の既存の出力ファイルは上書きせず、ローカルHTTPのみ使用する。元ファイルとシャードは**ベンチマーク終了後**、GitHub Actionsの一時領域に限って元ファイルを削除し、分割ファイルだけで最後の文章生成を行う。報告JSONはGitHub Actionsの \`Sol0-Qwen-single-vs-sharded-resource-metrics\` アーティファクトとして保存し、重みファイル・実行バイナリはアップロードしない。
+
+RSSは1プロセスの物理メモリ常駐量（ピークVmHWM）。GPU VRAM・OSファイルキャッシュ・システム全体のRAMは含まない。単体→分割の固定順で、ファイルキャッシュなどの影響を受けるため、**1回の測定だけで分割が省メモリ・高速とは結論しない。** 大型Kimiモデルの必要GPUメモリをこの数値で推定しない。
+
 ## Kimiへの適用
 
 Kimiの公式safetensorsはすでに多数のシャードに分割され、vLLMはそれらを読み込む設計。Sol0には指定されたsafetensorsシャードの一部をF16/BF16/F32として直接計算する試験を追加済み。ただし、そのカーネルはKimiのMoE全層を実行できない。Kimiモデルを実際にロードして日本語テキストを生成するE2Eは、対応GPU・全重み・モデル固有の推論ランタイムが必要で未検証。
