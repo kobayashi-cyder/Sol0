@@ -97,6 +97,49 @@ export async function inspectSafetensorsFile(path) {
   }
 }
 
+/**
+ * Validate publisher configuration only; no weights or model Python are read.
+ * A valid config proves model identity metadata, not vLLM compatibility.
+ */
+export function inspectKimiConfiguration(config, { family = 'auto' } = {}) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('Kimi config must be a JSON object');
+  }
+  const modelType = config.model_type;
+  const architecture = Array.isArray(config.architectures) ? config.architectures[0] : null;
+  const isKimiDev = family === 'kimi-dev' && modelType === 'qwen2'
+    && config.architectures.includes('Qwen2ForCausalLM');
+  if (!MODEL_TYPES.has(modelType) && !isKimiDev) {
+    throw new Error('Model architecture is not recognized as Kimi; Kimi-Dev needs --family=kimi-dev');
+  }
+  if (!['auto', 'kimi-dev'].includes(family) || (family === 'kimi-dev' && !isKimiDev)) {
+    throw new Error('Kimi family selector does not match model config');
+  }
+  if (typeof architecture !== 'string' || !architecture || architecture.length > 160) {
+    throw new Error('Kimi model architecture metadata is missing');
+  }
+  const text = config.text_config && typeof config.text_config === 'object'
+    ? config.text_config : config;
+  const routedExperts = text.n_routed_experts ?? text.num_experts ?? null;
+  const activeExpertsPerToken = text.num_experts_per_tok ?? text.num_experts_per_token ?? null;
+  const layers = text.num_hidden_layers ?? null;
+  for (const value of [routedExperts, activeExpertsPerToken, layers]) {
+    if (value !== null && (!Number.isSafeInteger(value) || value < 1 || value > 100000)) {
+      throw new Error('Kimi model dimensions exceed safe configuration bounds');
+    }
+  }
+  if (routedExperts !== null && activeExpertsPerToken !== null
+      && activeExpertsPerToken > routedExperts) {
+    throw new Error('Kimi active expert count exceeds available experts');
+  }
+  return Object.freeze({
+    modelType, family: isKimiDev ? 'kimi-dev' : modelType, architecture,
+    requiresCustomCode: !!(config.auto_map && Object.keys(config.auto_map).length),
+    routedExperts, activeExpertsPerToken, layers,
+    weightsLoaded: false, textInferenceVerified: false
+  });
+}
+
 export async function inspectLocalKimiModel(directory, { family = 'auto' } = {}) {
   if (typeof directory !== 'string' || !directory.trim()) throw new Error('Local model directory required');
   const modelDir = resolve(directory);
@@ -106,16 +149,7 @@ export async function inspectLocalKimiModel(directory, { family = 'auto' } = {})
     await readSmall(join(modelDir, 'config.json'), KIMI_LIMITS.configBytes, 'Kimi config.json'),
     'Kimi config.json'
   );
-  const modelType = config.model_type;
-  const isKimiDev = family === 'kimi-dev' && modelType === 'qwen2'
-    && Array.isArray(config.architectures)
-    && config.architectures.includes('Qwen2ForCausalLM');
-  if (!MODEL_TYPES.has(modelType) && !isKimiDev) {
-    throw new Error('Model architecture is not recognized as Kimi; Kimi-Dev needs --family=kimi-dev');
-  }
-  if (!['auto','kimi-dev'].includes(family) || (family === 'kimi-dev' && !isKimiDev)) {
-    throw new Error('Kimi family selector does not match model config');
-  }
+  const checked = inspectKimiConfiguration(config, {family});
   const contents = await readdir(modelDir, {withFileTypes:true});
   const names = contents.filter(f => f.isFile() && f.name.endsWith('.safetensors'))
     .map(f => f.name).sort();
@@ -152,9 +186,7 @@ export async function inspectLocalKimiModel(directory, { family = 'auto' } = {})
     verifiedHeaders++;
   }
   return Object.freeze({
-    modelDir, modelType, family: isKimiDev ? 'kimi-dev' : modelType,
-    architecture: config.architectures?.[0] ?? null,
-    requiresCustomCode: !!(config.auto_map && Object.keys(config.auto_map).length),
+    modelDir, ...checked,
     shards: names.length, headersChecked: verifiedHeaders,
     modelBytes, shardNames:Object.freeze(names), weightsAuthenticated: false
   });
