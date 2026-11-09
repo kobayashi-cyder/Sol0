@@ -39,18 +39,29 @@ export async function evaluateOneCapability(options, {
   const all=cases??await loadCapabilityCases();
   const selected=all.find(c=>c.id===options.caseId);
   if(!selected) throw new Error('Unknown capability case: '+options.caseId);
-  const response=await runLocalProbe(options,fetchImpl,selected.prompt);
+  let response;
+  let emptyResponse=false;
+  try {
+    response=await runLocalProbe(options,fetchImpl,selected.prompt);
+  } catch(error) {
+    // Empty replies are a *failed evaluation outcome*, not connectivity proof.
+    // Do not suppress HTTP failures, invalid response shapes, or timeouts.
+    if(error?.message!=='Model reply was empty') throw error;
+    response={answer:''};
+    emptyResponse=true;
+  }
   const exact=selected.expectedExact;
   const exactMatch=typeof exact==='string' ? response.answer.trim()===exact : null;
   return Object.freeze({
     model:options.model,
     caseId:selected.id,
     skill:selected.skill,
+    outcome:emptyResponse?'empty-response':'response',
     response:response.answer,
     exactMatch,
     reference:typeof exact==='string'?exact:null,
-    reviewStatus:'unreviewed',
-    reminder:'Exact match is not overall model quality; validate answers with independent evidence'
+    reviewStatus:emptyResponse?'needs-review':'unreviewed',
+    reminder:'Exact match and transport success do not prove overall model quality; review every failure'
   });
 }
 
