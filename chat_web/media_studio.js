@@ -1,3 +1,5 @@
+import {planImageScene,renderDirectedDetails} from './scene_director.js';
+
 /** Sol-Zero Media Studio v0.12. Procedural synthesis only: NO pretrained weights,
  * network, content APIs, hidden model, eval/Function, or external libraries.
  * The authored scene description is a recipe, NOT semantic image generation.
@@ -48,7 +50,9 @@ export function renderMediaScene(ctx,raw,time=0){
  } else {
   for(let i=0;i<Math.round(115*density);i++){const x=r()*w,y=r()*h,rad=4+r()*h*.16,phase=u*(i%4?1:-1);circle(ctx,x+Math.sin(phase+i)*4,y+Math.cos(phase)*3,rad,p[1+i%3]);}
  }
- return {theme,width:w,height:h,seed};
+ const scene=planImageScene(s.prompt,{seed,theme,width:w,height:h});
+ const composed=renderDirectedDetails(ctx,scene,{time:t,controls:s.controls});
+ return {theme,width:w,height:h,seed,composition:composed};
 }
 export function audioSpec(raw={}){
  const kind=String(raw.kind??'ambient');if(!['ambient','waves','wind','tones','robot'].includes(kind))throw Error('音声種別が不正です');
