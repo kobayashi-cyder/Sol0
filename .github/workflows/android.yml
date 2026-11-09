@@ -134,7 +134,7 @@ jobs:
           EXPECTED_ANDROID_API: '37'
         with:
           channel: canary
-          api-level: 37
+          api-level: '37.0'
           arch: x86_64
           target: google_apis
           profile: pixel_6
