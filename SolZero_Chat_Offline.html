@@ -2636,6 +2636,285 @@ function renderDirectedDetails(ctx,scene,{time=0,controls={density:1,motion:1}}=
  return {subjects:scene.subjects.length,style:scene.style,lighting:scene.lighting};
 }
 
+/**
+ * Local-only prompt assist for a user-supplied ComfyUI checkpoint.
+ * This is a deterministic vocabulary mapper, not an image language model.
+ */
+
+const KIND=Object.freeze({
+ cat:'cat',dog:'dog',robot:'robot',boat:'sailboat',house:'house',
+ bird:'bird',person:'person',car:'car',tree:'tree',flower:'flower',
+ cloud:'cloud',moon:'moon',sun:'sun'
+});
+const COLOR=Object.freeze({
+ '#d95255':'red','#488bc1':'blue','#e1b94e':'golden yellow',
+ '#6ca48a':'green','#a788ce':'purple','#ef9cc8':'pink',
+ '#e6e7ec':'white','#343b52':'black'
+});
+const POSITION=Object.freeze({left:'on the left',right:'on the right',
+ center:'in the center',auto:''});
+const DEPTH=Object.freeze({far:'in the background',near:'in the foreground',mid:''});
+const LIGHT=Object.freeze({night:'natural night lighting',golden:'golden hour lighting',
+ morning:'early morning light',day:'natural daylight'});
+const THEME=Object.freeze({space:'star-filled space',sea:'sea and ocean waves',
+ mountain:'mountain landscape',forest:'forest scenery',city:'cityscape',
+ flowers:'flower garden',rain:'rainfall',snow:'snow-covered landscape',
+ sunset:'sunset sky',abstract:'visually cohesive environment'});
+
+function boundedText(s,max=180){
+ if(typeof s!=='string'||!s.trim())throw Error('画像生成の説明文を入力してください');
+ if(s.length>max)throw Error('画像生成の説明文が長すぎます');
+ return s.trim();
+}
+
+function buildPhotorealPrompt(raw,{
+ negativePrompt='blurry, watermark, signature, low resolution',
+ maxCharacters=1600
+}={}){
+ const prompt=boundedText(raw?.prompt);
+ const seed=Number(raw?.seed);
+ const width=Number(raw?.width),height=Number(raw?.height);
+ if(!Number.isSafeInteger(seed)||seed<0||seed>0xffffffff||
+    !Number.isInteger(width)||width<96||width>1024||
+    !Number.isInteger(height)||height<72||height>1024){
+   throw Error('画像生成サイズまたはシードが範囲外です');
+ }
+ const theme=typeof raw.theme==='string'?raw.theme:'abstract';
+ const plan=planImageScene(prompt,{seed,theme,width,height});
+ if(typeof negativePrompt!=='string'||negativePrompt.length>500)throw Error('ネガティブ指定が長すぎます');
+ const objects=plan.subjects.map(subject=>{
+   return [COLOR[subject.color]??'',KIND[subject.kind]??subject.kind,
+     POSITION[subject.position]??'',DEPTH[subject.depth]??''].filter(Boolean).join(' ');
+ });
+ const derived=[
+   'photorealistic photograph','natural materials and physically plausible lighting',
+   'detailed textures','coherent perspective',THEME[theme]??THEME.abstract,
+   LIGHT[plan.lighting],...objects
+ ];
+ // Preserve the user's original text; unknown entities must not disappear.
+ const positive=derived.join(', ')+', '+prompt;
+ if(positive.length>maxCharacters)throw Error('構図プロンプトが上限を超えました');
+ return Object.freeze({
+   positive,negative:negativePrompt.trim(),seed,width,height,
+   subjects:plan.subjects.length,sceneStyle:plan.style,
+   interpretation:'rule-based composition aid; no guarantee of image fidelity'
+ });
+}
+
+/**
+ * Opt-in ComfyUI local image provider. No remote hosts, credentials, redirect,
+ * automatic background generation, model downloads or Android permissions.
+ * Requires a separately running ComfyUI API server + checkpoint + browser CORS.
+ */
+
+const COMFY_LIMITS=Object.freeze({
+ maxImageBytes:22_000_000,maxJsonBytes:524_288,
+ defaultPollMs:1000,minTimeoutMs:15000,maxTimeoutMs:300000
+});
+const SAMPLERS=new Set(['euler','euler_ancestral','dpmpp_2m','dpmpp_sde','heun']);
+const SCHEDULERS=new Set(['normal','karras','simple']);
+const PNG_SIGNATURE=[137,80,78,71,13,10,26,10];
+
+function normalizeComfyOrigin(origin='http://127.0.0.1:8188'){
+ if(typeof origin!=='string'||origin.length>120)throw Error('ローカルURLが不正です');
+ let url;
+ try{url=new URL(origin);}catch{throw Error('ComfyUIのURLが不正です');}
+ if(url.protocol!=='http:'||
+    !['127.0.0.1','localhost'].includes(url.hostname)||
+    !url.port||url.username||url.password||
+    url.pathname!=='/'||url.search||url.hash){
+   throw Error('ComfyUIはhttp://127.0.0.1:8188等のループバックURLのみ対応です');
+ }
+ return url.origin;
+}
+
+function validateCheckpoint(name){
+ if(typeof name!=='string'||name.length<5||name.length>200||
+   !/^[\p{L}\p{N} _./()\-]+$/u.test(name)||
+   name.startsWith('/')||name.includes('//')||
+   name.split('/').some(part=>!part||part==='.'||part==='..')||
+   !/\.(?:safetensors|ckpt)$/i.test(name)){
+   throw Error('ComfyUIのcheckpointsにあるモデルファイル名を指定してください');
+ }
+ return name;
+}
+function uint(n,min,max,label){
+ if(!Number.isInteger(n)||n<min||n>max)throw Error(label+'が範囲外です');
+ return n;
+}
+function configuration(options={}){
+ const origin=normalizeComfyOrigin(options.baseUrl);
+ const checkpoint=validateCheckpoint(options.checkpoint);
+ const steps=uint(Number(options.steps??20),4,50,'steps');
+ const cfg=Number(options.cfg??7);
+ if(!Number.isFinite(cfg)||cfg<1||cfg>20)throw Error('CFGが範囲外です');
+ const sampler=options.sampler??'euler';
+ const scheduler=options.scheduler??'normal';
+ if(!SAMPLERS.has(sampler)||!SCHEDULERS.has(scheduler))throw Error('Sampler/Schedulerが不正です');
+ const timeoutMs=uint(Number(options.timeoutMs??180000),COMFY_LIMITS.minTimeoutMs,
+   COMFY_LIMITS.maxTimeoutMs,'生成待機時間');
+ const pollMs=uint(Number(options.pollMs??COMFY_LIMITS.defaultPollMs),100,5000,'更新間隔');
+ return Object.freeze({origin,checkpoint,steps,cfg,sampler,scheduler,timeoutMs,pollMs});
+}
+
+/** ComfyUI API-format workflow (not its visual editor workflow JSON). */
+function buildComfyWorkflow(job,options){
+ const c=configuration(options);
+ const p=buildPhotorealPrompt(job,{negativePrompt:options.negativePrompt??
+   'blurry, watermark, signature, low resolution, distorted anatomy'});
+ if(p.width%8||p.height%8)throw Error('ComfyUI画像の縦横は8の倍数にしてください');
+ return Object.freeze({
+   '4':{class_type:'CheckpointLoaderSimple',inputs:{ckpt_name:c.checkpoint}},
+   '5':{class_type:'EmptyLatentImage',inputs:{
+     width:p.width,height:p.height,batch_size:1}},
+   '6':{class_type:'CLIPTextEncode',inputs:{text:p.positive,clip:['4',1]}},
+   '7':{class_type:'CLIPTextEncode',inputs:{text:p.negative,clip:['4',1]}},
+   '3':{class_type:'KSampler',inputs:{
+     seed:p.seed,steps:c.steps,cfg:c.cfg,sampler_name:c.sampler,
+     scheduler:c.scheduler,denoise:1,model:['4',0],
+     positive:['6',0],negative:['7',0],latent_image:['5',0]}},
+   '8':{class_type:'VAEDecode',inputs:{samples:['3',0],vae:['4',2]}},
+   '9':{class_type:'SaveImage',inputs:{filename_prefix:'Sol0_photoreal',images:['8',0]}}
+ });
+}
+function makePath(origin,path,params){
+ const u=new URL(origin+path);
+ if(params)for(const [k,v]of Object.entries(params))u.searchParams.set(k,v);
+ return u.href;
+}
+async function readJSON(response,label){
+ if(response.redirected)throw Error('ComfyUIがリダイレクトしました');
+ if(!response.ok)throw Error(label+'がHTTP '+(response.status??'エラー')+'を返しました');
+ const declared=Number(response.headers?.get?.('content-length')??0);
+ if(Number.isFinite(declared)&&declared>COMFY_LIMITS.maxJsonBytes)
+   throw Error('ComfyUIの応答が大きすぎます');
+ const raw=await response.text();
+ if(raw.length>COMFY_LIMITS.maxJsonBytes)throw Error('ComfyUIのJSONが大きすぎます');
+ let json;
+ try{json=JSON.parse(raw);}catch{throw Error('ComfyUIのJSON応答が不正です');}
+ if(!json||typeof json!=='object'||Array.isArray(json))throw Error('ComfyUIの応答形式が不正です');
+ return json;
+}
+function validateOutputImage(info){
+ if(!info||typeof info!=='object'||info.type!=='output'||
+   typeof info.filename!=='string'||info.filename.length>180||
+   !/^[^/\\\x00-\x1f]+\.png$/i.test(info.filename)||
+   info.filename==='.'||info.filename==='..'||
+   typeof info.subfolder!=='string'||info.subfolder.length>160||
+   info.subfolder.startsWith('/')||info.subfolder.includes('\\')||
+   info.subfolder.split('/').some(s=>s==='..'||s==='.')){
+   throw Error('ComfyUIの出力画像名または保存場所が不正です');
+ }
+ return {filename:info.filename,subfolder:info.subfolder,type:'output'};
+}
+function pngDimensions(bytes){
+ if(bytes.length<57||PNG_SIGNATURE.some((b,i)=>bytes[i]!==b)||
+    [bytes[12],bytes[13],bytes[14],bytes[15]].join(',')!=='73,72,68,82'||
+    bytes[8]!==0||bytes[9]!==0||bytes[10]!==0||bytes[11]!==13||
+    [bytes.at(-8),bytes.at(-7),bytes.at(-6),bytes.at(-5)].join(',')!=='73,69,78,68'){
+   throw Error('ComfyUIの結果が完全なPNG形式ではありません');
+ }
+ const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+ const w=view.getUint32(16),h=view.getUint32(20);
+ if(w<1||h<1||w>1024||h>1024)throw Error('生成PNGの寸法が不正です');
+ return {width:w,height:h};
+}
+async function readPNG(response){
+ if(response.redirected)throw Error('ComfyUI画像がリダイレクトされました');
+ if(!response.ok)throw Error('画像取得に失敗しました（HTTP '+(response.status??'?')+'）');
+ const length=Number(response.headers?.get?.('content-length')??0);
+ if(Number.isFinite(length)&&length>COMFY_LIMITS.maxImageBytes)
+   throw Error('生成画像が22MBの上限を超えています');
+ const raw=new Uint8Array(await response.arrayBuffer());
+ if(raw.length>COMFY_LIMITS.maxImageBytes||!raw.length)
+   throw Error('生成画像の容量が不正です');
+ const dims=pngDimensions(raw);
+ return {bytes:raw,...dims};
+}
+
+function createComfyUIProvider(options,dependencies={}){
+ const config=configuration(options);
+ const fetchImpl=dependencies.fetchImpl??globalThis.fetch;
+ const sleepImpl=dependencies.sleepImpl??(ms=>new Promise(r=>setTimeout(r,ms)));
+ const now=dependencies.now??(()=>Date.now());
+ if(typeof fetchImpl!=='function')throw Error('fetch is unavailable');
+ const request=(path,method='GET',body=null,ms=15000,params=null)=>{
+   const init={method,mode:'cors',credentials:'omit',redirect:'error',
+     cache:'no-store',signal:AbortSignal.timeout(ms)};
+   if(body!==null){init.headers={'Content-Type':'application/json'};
+     init.body=JSON.stringify(body);}
+   return fetchImpl(makePath(config.origin,path,params),init);
+ };
+ return Object.freeze({
+   kind:'comfyui',
+   endpoint:config.origin,
+   async available(){
+     const result=await readJSON(await request('/system_stats'),'ComfyUI接続確認');
+     if(!result.system||typeof result.system!=='object')
+       throw Error('ComfyUI APIの応答形式が一致しません');
+     return true;
+   },
+   async generate(job,{consent=false}={}){
+     if(consent!==true)throw Error('画像ごとの明示的な送信同意が必要です');
+     const workflow=buildComfyWorkflow(job,options);
+     const start=now();
+     const queued=await readJSON(await request('/prompt','POST',{prompt:workflow}),
+       'ComfyUIキューへの送信');
+     const id=queued.prompt_id;
+     if(typeof id!=='string'||id.length<8||id.length>128||
+        !/^[a-zA-Z0-9-]+$/.test(id)){
+       throw Error('ComfyUIが有効なprompt_idを返しませんでした');
+     }
+     let image=null;
+     // No websocket or background tasks; request terminates after bounded time.
+     for(let polls=0;polls<600;polls++){
+       if(now()-start>=config.timeoutMs)throw Error('ComfyUIの画像生成が時間切れです');
+       const history=await readJSON(await request('/history/'+encodeURIComponent(id)),
+         'ComfyUI画像生成履歴');
+       const item=history[id];
+       if(item&&typeof item==='object'){
+         if(item.status?.status_str==='error')throw Error('ComfyUIで生成エラーが発生しました');
+         if(item.status?.completed===true || item.outputs){
+           const images=item.outputs?.['9']?.images;
+           if(!Array.isArray(images)||!images.length)
+             throw Error('ComfyUIのSaveImage出力がありません');
+           image=validateOutputImage(images[0]);
+           break;
+         }
+       }
+       await sleepImpl(config.pollMs);
+     }
+     if(!image)throw Error('ComfyUIの画像生成待機回数を超えました');
+     const response=await request('/view','GET',null,20000,image);
+     const png=await readPNG(response);
+     if(png.width!==Number(job.width)||png.height!==Number(job.height))
+       throw Error('ComfyUIの画像サイズが指定と一致しません');
+     return Object.freeze({
+       kind:'comfyui',mime:'image/png',bytes:png.bytes,
+       width:png.width,height:png.height,
+       promptId:id,seed:Number(job.seed),model:config.checkpoint,
+       elapsedMs:Math.max(0,now()-start),
+       source:'user-authorized loopback ComfyUI; independent model not bundled'
+     });
+   }
+ });
+}
+
+/**
+ * Image provider registry. Default stays procedural and never accesses a URL.
+ * Provider configuration belongs to the current UI action, not localStorage.
+ */
+
+function createImageProvider(config={type:'none'},deps={}){
+ if(config?.type==='comfyui')return createComfyUIProvider(config,deps);
+ if(config?.type===undefined||config?.type==='none')return Object.freeze({
+   kind:'none',
+   async available(){return false;},
+   async generate(){throw Error('写実画像は未接続です。通常のPNG生成を使用できます。');}
+ });
+ throw Error('画像プロバイダ種別が不正です');
+}
+
 
 /** Sol-Zero Media Studio v0.12. Procedural synthesis only: NO pretrained weights,
  * network, content APIs, hidden model, eval/Function, or external libraries.
@@ -2820,6 +3099,7 @@ class MediaWSP{
 /** Unified offline media workspace for Sol-Zero. No external AI/services. */
 
 
+
 const STORE='solzero_studio_v012_recipe',DB_NAME='solzero_media_v012';
 function element(tag,txt){const x=document.createElement(tag);if(txt!==undefined)x.textContent=txt;return x;}
 function mimeFor(name){const ext=name.toLowerCase().split('.').pop();return ({png:'image/png',gif:'image/gif',jpg:'image/jpeg',jpeg:'image/jpeg',wav:'audio/wav',mp3:'audio/mpeg',webm:'video/webm',mp4:'video/mp4'})[ext]||null;}
@@ -2947,6 +3227,26 @@ class MediaStudio {
   this.assets=[];
  }
  async makeImage(p=this.project){const s=this.buildSpec(p),canvas=makeCanvas(s.width,s.height);renderMediaScene(canvas.getContext('2d'),s,0);const bytes=await toPng(canvas);return this.add(`media_${Date.now()}.png`,'image/png',bytes,'image',s);}
+ /**
+  * One-shot explicit local-model image. Only the returned validated PNG enters
+  * the existing atomic IndexedDB/ZIP asset path. Never replace old art on fail.
+  */
+ async makePhotorealImage(p=this.project,config={},consent=false){
+  if(this.busy)throw Error('すでに生成中です');
+  if(consent!==true)throw Error('画像ごとに接続と送信の確認が必要です');
+  this.busy=true;
+  try{
+   const spec=this.buildSpec(p);
+   const provider=createImageProvider({type:'comfyui',...config});
+   const output=await provider.generate(spec,{consent:true});
+   return await this.add('photoreal_'+Date.now()+'.png','image/png',
+     output.bytes,'photoreal',{
+       ...spec,source:'local-comfyui',model:output.model,
+       promptId:output.promptId,imageWidth:output.width,imageHeight:output.height,
+       elapsedMs:output.elapsedMs
+     });
+  }finally{this.busy=false;}
+ }
  async makeAudio(p=this.project){const spec=audioSpec({kind:p.kind,seconds:Number(p.frames)/Number(p.fps),seed:Number(p.seed),text:p.text,pitch:this.buildSpec(p).controls.pitch}),bytes=wavBytes(spec);return this.add(`audio_${Date.now()}.wav`,'audio/wav',bytes,'audio',spec);}
  async makeGif(p=this.project){const origin=this.buildSpec(p),s={...origin,width:Math.min(320,origin.width),height:Math.min(180,origin.height)},frames=[],canvas=makeCanvas(s.width,s.height),ctx=canvas.getContext('2d',{willReadFrequently:true});
   for(let i=0;i<s.frames;i++){renderMediaScene(ctx,s,i/s.fps);frames.push(rgbaToIndex(ctx.getImageData(0,0,s.width,s.height).data,s.width,s.height));if(i%5===0)await new Promise(resolve=>setTimeout(resolve,0));}
@@ -3050,6 +3350,31 @@ class MediaStudio {
   const duration=setRow('動画長（フレーム数）','text',`${this.project.frames}`,[['16','2秒'],['24','3秒'],['32','4秒'],['48','6秒']]);
   const sound=setRow('音の種類','text',this.project.kind,[['ambient','アンビエント'],['waves','波音'],['wind','風音'],['tones','オリジナル電子音'],['robot','簡易ロボット声（音素風）']]);
   const speech=setRow('ロボット声の文字','text',this.project.text);
+
+  root.append(element('h3','写実画像（PCブラウザ専用・ローカルComfyUI）'));
+  const photoHint=element('p','任意機能です。ComfyUIのモデルは利用者が別途用意してください。生成要求ごとに確認します。Android APKは通信権限がなく非対応。接続情報は保存しません。');
+  photoHint.className='muted';root.append(photoHint);
+  const comfyURL=setRow('ComfyUI接続先（127.0.0.1のみ）','text','http://127.0.0.1:8188');
+  const checkpoint=setRow('モデル名（checkpointsフォルダ内）','text','model.safetensors');
+  const steps=setRow('推論ステップ','number',20);
+  const cfg=setRow('CFG','number',7);
+  const sampler=setRow('Sampler','text','euler',[
+    ['euler','euler'],['euler_ancestral','euler_ancestral'],
+    ['dpmpp_2m','dpmpp_2m'],['dpmpp_sde','dpmpp_sde'],['heun','heun']]);
+  const scheduler=setRow('Scheduler','text','normal',[
+    ['normal','normal'],['karras','karras'],['simple','simple']]);
+  const negative=setRow('避けたい表現','textarea',
+    'blurry, watermark, signature, low resolution, distorted anatomy');
+  const fallbackLabel=element('label','接続エラー時に手続き描画へ切り替える（明示許可）');
+  const fallback=element('input');fallback.type='checkbox';fallback.checked=false;
+  fallbackLabel.prepend(fallback);root.append(fallbackLabel);
+  const comfyConfig=()=>({
+    baseUrl:comfyURL.value.trim(),checkpoint:checkpoint.value.trim(),
+    steps:Number(steps.value),cfg:Number(cfg.value),sampler:sampler.value,
+    scheduler:scheduler.value,negativePrompt:negative.value,
+    timeoutMs:180000
+  });
+
   const log=element('div','準備完了。生成結果は端末に保存されます（対応ブラウザのIndexedDB）。');log.className='listentry';root.append(log);
   const btnrow=element('div');btnrow.className='buttons';root.append(btnrow);
   const collect=()=>{const [w,h]=dims.value.split('x').map(Number);const p={name:name.value.slice(0,60),prompt:prompt.value,seed:Number(seed.value),theme:theme.value,width:w,height:h,frames:Number(duration.value),fps:8,kind:sound.value,text:speech.value};this.buildSpec(p);audioSpec({kind:p.kind,seconds:p.frames/p.fps,seed:p.seed,text:p.text});this.project=p;this.saveRecipe();return p;};
@@ -3063,7 +3388,24 @@ class MediaStudio {
   }catch(err){log.textContent='エラー：'+err.message;}
   finally{this.drawAssets(list,notify);b.disabled=false;this.uiBusy=false;}
  });btnrow.append(b);};
-  action('画像 PNG',p=>this.generate('image',p));action('音声 WAV',p=>this.generate('audio',p));action('動画 GIF',p=>this.generate('gif',p));action('音声付き動画 WebM',p=>this.generate('webm',p));
+  action('画像 PNG',p=>this.generate('image',p));
+
+  action('写実画像 ComfyUI（毎回確認）',async p=>{
+   const config=comfyConfig();
+   const provider=createImageProvider({type:'comfyui',...config});
+   const approved=confirm('現在の画像指示を '+provider.endpoint+
+     ' のComfyUIへ送信します（モデル：'+config.checkpoint+'）。この1件を実行しますか？');
+   if(!approved)return '写実画像の送信を取り消しました。既存画像は維持しています。';
+   try{
+    return await this.makePhotorealImage(p,config,true);
+   }catch(error){
+    if(!fallback.checked)throw error;
+    const procedural=await this.generate('image',p);
+    return 'ComfyUI生成に失敗したため、許可された手続き描画で保存：'+
+      procedural.name+'（原因：'+error.message+'）';
+   }
+  });
+action('音声 WAV',p=>this.generate('audio',p));action('動画 GIF',p=>this.generate('gif',p));action('音声付き動画 WebM',p=>this.generate('webm',p));
   action('画像＋音声＋GIF一括',async p=>{const assets=await this.generateBatch(['image','audio','gif'],p);return `${assets.length}種類の素材を生成しました。作品ZIPで一括取得できます。`;});
   const extras=element('div');extras.className='buttons';root.append(extras);
   const extra=(label,fn)=>{const b=element('button',label);b.className='btn';b.addEventListener('click',async()=>{
@@ -3072,6 +3414,11 @@ class MediaStudio {
   try{await fn();}catch(error){log.textContent='操作を中止：'+error.message;}
   finally{this.uiBusy=false;}
  });extras.append(b);};
+  extra('ComfyUI接続確認',async()=>{
+    const provider=createImageProvider({type:'comfyui',...comfyConfig()});
+    await provider.available();
+    log.textContent='ComfyUIローカルAPIに接続できました。画像モデルによる推論成功は未確認です。';
+  });
   extra('全素材をZIPで書き出し',()=>{try{log.textContent='作品ZIP保存：'+this.exportZip().toLocaleString('ja-JP')+'バイト';}catch(e){log.textContent='ZIPエラー：'+e.message;}});
   const inp=element('input');inp.type='file';inp.accept='.zip,application/zip';inp.className='hidden';root.append(inp);
   extra('作品ZIPを復元',()=>inp.click());inp.addEventListener('change',async()=>{const file=inp.files?.[0];inp.value='';if(!file)return;if(this.uiBusy||this.busy)return;
