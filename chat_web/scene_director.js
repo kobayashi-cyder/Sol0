@@ -66,9 +66,13 @@ function positionNear(text,start,end){
  return 'auto';
 }
 function depthNear(text,start,end){
- const window=text.slice(Math.max(0,start-14),Math.min(text.length,end+9));
- if(/遠く|遠景|背景|奥に|far|background/i.test(window))return 'far';
- if(/手前|前景|近く|foreground|near/i.test(window))return 'near';
+ // Context must stop at the clause boundary or the previous object's
+ // "遠く" instruction incorrectly leaks into the next "手前" object.
+ const before=text.slice(Math.max(0,start-18),start).split(/[。、，,;；]/).at(-1);
+ const after=text.slice(end,Math.min(text.length,end+14)).split(/[。、，,;；]/)[0];
+ const local=before+' '+after;
+ if(/手前|前景|近く|foreground|near/i.test(local))return 'near';
+ if(/遠く|遠景|背景|奥に|far|background/i.test(local))return 'far';
  return 'mid';
 }
 function inferStyle(text){
