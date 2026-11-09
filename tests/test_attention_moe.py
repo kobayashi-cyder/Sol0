@@ -7,7 +7,8 @@ def test_causal_attention_never_reads_future():
     q = [[1.0], [1.0]]
     k = [[0.0], [0.0]]
     result = causal_attention(q, k, [[2.0], [10.0]])
-    assert result[0] == pytest.approx([2.0])\n    assert result[1] == pytest.approx([6.0])
+    assert result[0] == pytest.approx([2.0])
+    assert result[1] == pytest.approx([6.0])
     changed = causal_attention(q, k, [[2.0], [1000.0]])
     assert changed[0] == pytest.approx([2.0])
 
