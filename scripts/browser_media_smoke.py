@@ -20,6 +20,33 @@ def run():
         page.locator('#studioBtn').click(force=True)
         page.wait_for_timeout(250)
         assert page.locator('#panelTitle').inner_text()=='メディア工房'
+        # Train material WSP from a locally generated PNG, synthesize a PNG,
+        # and ensure the new asset joins the existing offline media workspace.
+        from base64 import b64decode
+        png_url=page.evaluate("""() => {
+          const c=document.createElement('canvas');c.width=64;c.height=64;
+          const x=c.getContext('2d');
+          for(let row=0;row<64;row++){x.fillStyle='rgb('+row*3+','+(255-row*2)+',90)';x.fillRect(0,row,64,1);}
+          return c.toDataURL('image/png');
+        }""")
+        page.locator('#panelBody input[accept="image/png,image/jpeg,image/webp"]').set_input_files({
+            'name':'material.png','mimeType':'image/png','buffer':b64decode(png_url.split(',',1)[1])})
+        page.get_by_role('button',name='参考画像をWSPへ学習').click()
+        expect(page.locator('#panelBody')).to_contain_text('端末へ保存済み',timeout=12000)
+        page.get_by_role('button',name='WSPで画像PNG生成').click()
+        page.wait_for_function("""() =>
+          [...document.querySelectorAll('#panelBody .listentry b')]
+          .some(e=>e.textContent.includes('wsp_skin_'))""",timeout=15000)
+        assert page.evaluate("() => Boolean(localStorage.getItem('sol0_wsp_material_experts_v1'))")
+        # Exercise learned WSP cooperative image generation on a mobile browser,
+        # followed by local weight fine tuning and on-device persistence.
+        page.get_by_label('主材質').select_option('skin')
+        page.get_by_role('button',name='協調生成 PNG').click()
+        page.wait_for_function("""() =>
+          [...document.querySelectorAll('#panelBody .listentry b')]
+          .some(e=>e.textContent.includes('coop_skin_'))""",timeout=20000)
+        page.get_by_role('button',name='WSP重みを微調整').click()
+        assert page.evaluate("() => Boolean(localStorage.getItem('sol0_wsp_cooperative_router_v1'))")
         for label in ['画像 PNG','音声 WAV','動画 GIF','音声付き動画 WebM']:
             page.get_by_role('button',name=label,exact=True).click()
             page.wait_for_function("() => document.querySelector('#panelBody .listentry')?.textContent.includes('生成完了：')",timeout=15000)
@@ -101,7 +128,7 @@ def run():
         session_page.get_by_role('button',name='指定からプレビュー').click()
         temporary.close()
         assert not errors,errors
-        print('PASS: local-origin PNG/WAV/GIF/WebM + ZIP + WSP controls + mobile touch UI')
+        print('PASS: local-origin WSP material learn/generate + PNG/WAV/GIF/WebM + ZIP + WSP controls + mobile touch UI')
         browser.close()
 
 if __name__=='__main__':
