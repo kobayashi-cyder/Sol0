@@ -239,7 +239,7 @@ export class MediaStudio {
   return next.length;
  }
  async importMedia(files){let added=0;for(const f of [...files]){const type=mimeFor(f.name);if(!type||f.type && type!==f.type||f.size>22_000_000)continue;await this.add(`imported_${Date.now()}_${added}.${f.name.split('.').at(-1).toLowerCase()}`,type,new Uint8Array(await f.arrayBuffer()),'import',{originalName:f.name.slice(0,100)});added++;}return added;}
- render(root,helpers){const {notify}=helpers;root.replaceChildren();const notice=element('p','生成AIではなく、コードから直接画像・波形・フレームを作る独自エンジンです。学習済みモデル・通信・外部APIなし。WebMはブラウザ対応時のみ音声入りで生成します。');notice.className='muted';root.append(notice);
+ render(root,helpers){const {notify}=helpers;root.replaceChildren();const notice=element('p','通常の画像・音声・動画は通信しない手続き生成です。PCブラウザでは、別途インストールしたローカルComfyUIへ毎回の確認後だけPNG生成を依頼できます。WebMはブラウザ対応時のみ音声付きです。');notice.className='muted';root.append(notice);
   const storage=element('p',this.storageState==='saved'?
     '素材保存：端末内のIndexedDBへ完了後に反映します。':
     '注意：素材は一時保存です。画面終了前に作品ZIPを書き出してください。');
@@ -289,10 +289,10 @@ export class MediaStudio {
    log.textContent=typeof result==='string'?result:`生成完了：${result.name}（${result.bytes.length.toLocaleString('ja-JP')}バイト）`;
   }catch(err){log.textContent='エラー：'+err.message;}
   finally{this.drawAssets(list,notify);b.disabled=false;this.uiBusy=false;}
- });btnrow.append(b);};
+ });btnrow.append(b);return b;};
   action('画像 PNG',p=>this.generate('image',p));
 
-  action('写実画像 ComfyUI（毎回確認）',async p=>{
+  const photoButton=action('写実画像 ComfyUI（毎回確認）',async p=>{
    const config=comfyConfig();
    const provider=createImageProvider({type:'comfyui',...config});
    const approved=confirm('現在の画像指示を '+provider.endpoint+
@@ -315,12 +315,16 @@ action('音声 WAV',p=>this.generate('audio',p));action('動画 GIF',p=>this.gen
   this.uiBusy=true;
   try{await fn();}catch(error){log.textContent='操作を中止：'+error.message;}
   finally{this.uiBusy=false;}
- });extras.append(b);};
-  extra('ComfyUI接続確認',async()=>{
+ });extras.append(b);return b;};
+  const connectionButton=extra('ComfyUI接続確認',async()=>{
     const provider=createImageProvider({type:'comfyui',...comfyConfig()});
     await provider.available();
     log.textContent='ComfyUIローカルAPIに接続できました。画像モデルによる推論成功は未確認です。';
   });
+  if(typeof window!=='undefined'&&window.SolZeroDownloads){
+    photoButton.disabled=true;connectionButton.disabled=true;
+    photoHint.textContent='Android APKは通信権限なしの完全オフライン版です。写実ComfyUIは同じPC上のブラウザ版だけで使用してください。';
+  }
   extra('全素材をZIPで書き出し',()=>{try{log.textContent='作品ZIP保存：'+this.exportZip().toLocaleString('ja-JP')+'バイト';}catch(e){log.textContent='ZIPエラー：'+e.message;}});
   const inp=element('input');inp.type='file';inp.accept='.zip,application/zip';inp.className='hidden';root.append(inp);
   extra('作品ZIPを復元',()=>inp.click());inp.addEventListener('change',async()=>{const file=inp.files?.[0];inp.value='';if(!file)return;if(this.uiBusy||this.busy)return;
