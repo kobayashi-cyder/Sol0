@@ -40,6 +40,8 @@ media_studio = re.sub(r'\bexport (const|class|function)\b', r'\1', media_studio)
 material_wsp = re.sub(r'\bexport (const|class|function)\b', r'\1', material_wsp)
 material_lab_ui = re.sub(r'\bexport (const|class|function)\b', r'\1', material_lab_ui)
 material_lab_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./wsp_materials\.js['\"];?\s*$", '', material_lab_ui, flags=re.MULTILINE)
+material_wsp = '\nconst {MaterialWSP,WSP_MATERIALS,WSP_MATERIAL_LIMITS} = (() => {\n' + material_wsp + '\nreturn {MaterialWSP,WSP_MATERIALS,WSP_MATERIAL_LIMITS};\n})();\n'
+material_lab_ui = '\nconst {mountMaterialLab} = (() => {\n' + material_lab_ui + '\nreturn {mountMaterialLab};\n})();\n'
 media_ui = re.sub(r'\bexport (const|class|function)\b', r'\1', media_ui)
 media_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./media_studio\.js['\"];?\s*$", '', media_ui, flags=re.MULTILINE)
 media_ui = re.sub(r"^import\s+\{[^\n]*?\}\s+from\s+['\"]\./material_lab_ui\.js['\"];?\s*$", '', media_ui, flags=re.MULTILINE)
