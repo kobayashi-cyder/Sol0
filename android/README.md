@@ -17,6 +17,8 @@ gradle --no-daemon -p android :app:testDebugUnitTest :app:assembleDebug
 
 GitHub Actions `.github/workflows/android.yml` でAndroid単体テスト、APK生成、署名とZIP整列、パッケージIDの検証、INTERNET権限不在、内蔵HTMLのSHA256一致、Android15エミュレータでの操作を検証します。成功したビルドの `Artifacts` から検証用APKを取得します。
 
+Android17物理端末の読み取り専用事前確認は [PHYSICAL_PREFLIGHT.md](PHYSICAL_PREFLIGHT.md) と android/tests/physical_preflight.py を参照してください。既定で端末データの読み書き・アプリ操作は行わず、識別番号を検証記録に含めません。Android17エミュレータの成功は実機の代わりではありません。
+
 ## 利用上の注意
 
 - 固定パッケージID：`jp.solzero.offline`、Android10（API29）以上を想定。

@@ -6,7 +6,7 @@ and websocket-client. No network services or pretrained models.
 import json
 import time
 from urllib.request import urlopen
-from websocket import create_connection
+from websocket import WebSocketException, create_connection
 
 BASE = 'http://127.0.0.1:9222/json'
 EXPECTED_URL = 'https://appassets.androidplatform.net/assets/index.html'
@@ -14,20 +14,6 @@ EXPECTED_URL = 'https://appassets.androidplatform.net/assets/index.html'
 def pages():
     with urlopen(BASE, timeout=3) as response:
         return json.load(response)
-
-def page_socket():
-    last = None
-    for _ in range(90):
-        try:
-            for item in pages():
-                if item.get('url') == EXPECTED_URL and item.get('webSocketDebuggerUrl'):
-                    print('WebView page:', item['url'])
-                    return create_connection(item['webSocketDebuggerUrl'], timeout=10,
-                                             suppress_origin=True)
-        except Exception as exc:
-            last = exc
-        time.sleep(0.5)
-    raise AssertionError(f'Offline WebView did not open: {last}')
 
 class DevTools:
     def __init__(self, sock):
@@ -61,13 +47,41 @@ class DevTools:
             time.sleep(0.3)
         raise AssertionError(f'Condition did not become {expected}: {actual}, code={code}')
 
+def ready_devtools():
+    # WebView can replace its debugger target during startup. Attach to a ready
+    # document before issuing any test actions.
+    deadline = time.monotonic() + 45
+    last = 'debugger target has not appeared'
+    while time.monotonic() < deadline:
+        sock = None
+        ready = False
+        try:
+            target = next((item for item in pages()
+                           if item.get('url') == EXPECTED_URL and item.get('webSocketDebuggerUrl')), None)
+            if target:
+                sock = create_connection(target['webSocketDebuggerUrl'], timeout=3,
+                                         suppress_origin=True)
+                dev = DevTools(sock)
+                if dev.evaluate("""Boolean(
+                    document.getElementById('agentBtn') && document.getElementById('messages')
+                    && window.SolZeroDownloads && window.__solZeroDownloadsReady
+                )""") is True:
+                    sock.settimeout(25)
+                    print('WebView page:', target['url'])
+                    ready = True
+                    return dev
+                last = 'offline page initialization is incomplete'
+        except (OSError, WebSocketException, json.JSONDecodeError) as exc:
+            last = exc
+        finally:
+            if sock is not None and not ready:
+                sock.close()
+        time.sleep(0.5)
+    raise AssertionError(f'Offline WebView did not become ready: {last}')
+
 def main():
-    sock = page_socket()
-    sock.settimeout(25)
-    dev = DevTools(sock)
-    dev.wait_for("Boolean(document.getElementById('agentBtn') && document.getElementById('messages'))")
+    dev = ready_devtools()
     assert 'Sol0' in dev.evaluate('document.title'), 'Wrong HTML page'
-    dev.wait_for("Boolean(window.SolZeroDownloads && window.__solZeroDownloadsReady)")
     print('PASS: offline WebView, built-in task UI, native download hook')
 
     dev.evaluate("document.getElementById('agentBtn').click(); true")
@@ -140,6 +154,38 @@ def main():
     print('PASS: BANC888 cognition planning is inspectable and preview-only')
 
 
+    # Data-safety regression inside the actual Android WebView JS runtime.
+    # Synthetic input file avoids permission prompts and NEVER confirms a
+    # destructive import. Existing WSP chat and storage must remain intact.
+    protected = dev.evaluate("""(async () => {
+      const key='solzero_chat_v012_local';
+      const before=localStorage.getItem(key);
+      const badBackup={
+        schema:3,current:'invalid-import',chats:[{
+          id:'invalid-import',title:'SHOULD_NOT_SHOW',
+          messages:[{role:'assistant',text:'BROKEN_WSP_SHOULD_NOT_SHOW',at:'2026-11-09T00:00:00Z'}]
+        }],
+        wsp:{weights:[[99999]]}
+      };
+      const dt=new DataTransfer();
+      dt.items.add(new File([JSON.stringify(badBackup)],'broken.json',
+        {type:'application/json'}));
+      const picker=document.getElementById('jsonPicker');
+      picker.files=dt.files;
+      picker.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve=>setTimeout(resolve,350));
+      return {
+        unchanged:localStorage.getItem(key)===before,
+        visible:[...document.querySelectorAll('.message .bubble')]
+          .some(x=>x.textContent.includes('BROKEN_WSP_SHOULD_NOT_SHOW')),
+        warning:document.getElementById('toast')?.textContent??''
+      };
+    })()""")
+    assert protected['unchanged'], 'Android WebView overwrote storage on corrupt WSP'
+    assert not protected['visible'], 'Android WebView displayed corrupt imported chat'
+    assert '破損' in protected['warning'], protected
+    print('PASS: real Android WebView rejects corrupt WSP backup without changing storage')
+
     dev.evaluate("document.getElementById('exportJson').click(); true")
     # Native bridge writes to Downloads/SolZero; independently verify on adb.
     time.sleep(3)
@@ -156,7 +202,7 @@ def main():
     assert clicked is True, 'image-generation button missing'
     dev.wait_for("document.getElementById('panelBody')?.textContent.includes('生成完了：')")
     print('PASS: Android WebView generated PNG and updated studio UI')
-    sock.close()
+    dev.sock.close()
 
 if __name__ == '__main__':
     main()

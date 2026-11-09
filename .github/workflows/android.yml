@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-apk:
@@ -96,3 +99,74 @@ jobs:
           emulator-boot-timeout: 900
           script: bash android/tests/emulator_runner.sh
 
+  # Android 17 API 37 compatibility adds OS coverage, NOT real phone coverage.
+  # Official Android emulator requires >=4GiB RAM for Android 17 AVDs.
+  emulator-android17-smoke:
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/integrate-atomic-import-and-local-models-20261109'
+    needs: build-apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Sol0-v016-Android-debug-APK
+          path: android-apk
+      - name: Enable KVM for Android 17 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            sudo chmod 0666 /dev/kvm
+          fi
+          ls -l /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Install WebView debug test driver
+        run: python -m pip install --disable-pip-version-check websocket-client==1.8.0
+      - name: Validate test runner syntax
+        run: |
+          bash -n android/tests/emulator_runner.sh
+          python -m py_compile android/tests/emulator_smoke.py
+      - name: Install command-line tools for the Android 37.2 AVD
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/cmdline-tools"
+          latest="$tools/latest"
+          revision="$(sed -nE 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$latest/source.properties")"
+          # Older avdmanager versions write target=android-0 for dotted API levels.
+          if (( revision < 23 )); then
+            (set +o pipefail; yes | "$latest/bin/sdkmanager" --licenses >/dev/null)
+            "$latest/bin/sdkmanager" --install 'cmdline-tools;23.0'
+            test -x "$tools/23.0/bin/avdmanager"
+            previous="$(mktemp -d "$RUNNER_TEMP/sol0-cmdline.XXXXXX")"
+            mv "$latest" "$previous/latest"
+            ln -s 23.0 "$latest"
+          fi
+          "$latest/bin/sdkmanager" --version
+      - name: Boot Android 17 API 37 and run same offline WebView regression
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          EXPECTED_ANDROID_API: '37'
+        with:
+          channel: canary
+          api-level: '37.2'
+          arch: x86_64
+          target: google_apis_ps16k
+          emulator-build: '15917651'
+          emulator-options: '-no-window -gpu swangle_indirect -no-snapshot -noaudio -no-boot-anim'
+          profile: pixel_6
+          ram-size: 4096M
+          disk-size: 6144M
+          disable-animations: true
+          emulator-boot-timeout: 900
+          pre-emulator-launch-script: grep -Fx target=android-37.2 "$ANDROID_AVD_HOME/test.ini"
+          script: bash android/tests/emulator_runner.sh
