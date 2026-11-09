@@ -44,10 +44,10 @@ def run():
         expect(desc).to_contain_text("golden")
         example=canvas_fingerprint(page)
         assert example!=before,(example,before)
-        assert "赤い猫" in page.locator("#panelBody textarea").input_value()
+        assert "赤い猫" in page.locator("#panelBody textarea").first.input_value()
         page.get_by_role("button",name="指定からプレビュー",exact=True).click()
         assert example==canvas_fingerprint(page),"Scene must be reproducible for same seed"
-        page.locator("#panelBody textarea").fill("星空の宇宙、左に月、右に鳥、ネオン")
+        page.locator("#panelBody textarea").first.fill("星空の宇宙、左に月、右に鳥、ネオン")
         page.get_by_role("button",name="指定からプレビュー",exact=True).click()
         expect(desc).to_contain_text("月・鳥")
         expect(desc).to_contain_text("neon")
