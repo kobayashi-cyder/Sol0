@@ -98,7 +98,7 @@ def run():
         browser=pw.chromium.launch(headless=True,args=["--no-sandbox","--disable-dev-shm-usage"],
             **({"executable_path":system} if system else {}))
         page=browser.new_page(viewport={"width":390,"height":820},accept_downloads=True)
-        errors=[],dialogs=[]
+        errors=[];dialogs=[]
         page.on("pageerror",lambda exc:errors.append(str(exc)))
         page.on("dialog",lambda dlg:(dialogs.append(dlg.message),dlg.accept()))
         page.goto(origin+"SolZero_Chat_Offline.html",wait_until="load")
