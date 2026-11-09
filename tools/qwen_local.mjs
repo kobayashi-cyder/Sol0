@@ -25,13 +25,20 @@ function portNumber(value, name) {
   return port;
 }
 
+function boundedLayerCount(value, name) {
+  if (!/^[0-9]+$/.test(String(value))) throw new Error(name + ' must be a nonnegative integer');
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 256) throw new Error(name + ' exceeds safe layer limits');
+  return n;
+}
+
 export function parseArgs(argv) {
   const options = Object.create(null);
   for (const arg of argv) {
     const match = /^--([a-z0-9-]+)(?:=(.*))?$/.exec(arg);
     if (!match) throw new Error('Unknown argument: ' + arg);
     const [, key, value] = match;
-    if (!['help', 'model', 'runner', 'port', 'ui-port', 'sha256'].includes(key)) {
+    if (!['help', 'model', 'runner', 'port', 'ui-port', 'sha256', 'gpu-layers', 'cpu-moe-layers'].includes(key)) {
       throw new Error('Unknown argument: --' + key);
     }
     if (Object.hasOwn(options, key)) throw new Error('Duplicate argument: --' + key);
@@ -57,17 +64,21 @@ export function parseArgs(argv) {
   const runner = options.runner ?? 'llama-server';
   if (runner.startsWith('-') || runner.includes('\0')) throw new Error('Invalid runner path');
   return Object.freeze({
-    model: resolve(options.model), runner, port, uiPort, sha256
+    model: resolve(options.model), runner, port, uiPort, sha256,
+    gpuLayers: options['gpu-layers'] === undefined ? null : boundedLayerCount(options['gpu-layers'], '--gpu-layers'),
+    cpuMoeLayers: options['cpu-moe-layers'] === undefined ? null : boundedLayerCount(options['cpu-moe-layers'], '--cpu-moe-layers')
   });
 }
 
-export function buildRunnerArgs({ model, port, uiPort }) {
+export function buildRunnerArgs({ model, port, uiPort, gpuLayers = null, cpuMoeLayers = null }) {
   return [
     '--model', model,
     '--host', '127.0.0.1',
     '--port', String(port),
     '--alias', QWEN_ALIAS,
     '--ctx-size', '4096',
+    ...(gpuLayers === null ? [] : ['--n-gpu-layers', String(gpuLayers)]),
+    ...(cpuMoeLayers === null ? [] : ['--n-cpu-moe', String(cpuMoeLayers)]),
     '--cors-origins', 'http://127.0.0.1:' + uiPort,
     '--offline',
     '--no-webui'
@@ -153,6 +164,8 @@ export const HELP = [
   'node tools/qwen_local.mjs --model=/absolute/path/Qwen3-0.6B-Q4_K_M.gguf',
   'Optional: --runner=/path/to/llama-server --port=9931 --ui-port=8765',
   'Optional: --sha256=<known 64-hex SHA256> verifies the complete file before launch.',
+  'Optional: --gpu-layers=0 puts layers on CPU (slow; RAM required).',
+  'Optional: --cpu-moe-layers=N keeps N MoE expert layers on CPU (only MoE models).',
   'No model download, telemetry or cloud inference. Everything binds to 127.0.0.1.',
   'llama.cpp supplies the actual inference operations; Sol0 does not yet have',
   'its own native GGUF/Qwen tensor execution engine.',

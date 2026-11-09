@@ -170,3 +170,19 @@ test('launch gives validated model path to a no-shell subprocess only', async ()
     assert.equal(called.args[called.args.indexOf('--host')+1],'127.0.0.1');
   } finally {await rm(dir,{recursive:true,force:true});}
 });
+
+test('sliced loading: Qwen CLI bounds requested GPU and MoE CPU layers', () => {
+  const opts=parseArgs(['--model=./qwen3.gguf','--gpu-layers=0','--cpu-moe-layers=8']);
+  const args=buildRunnerArgs(opts);
+  assert.equal(opts.gpuLayers,0);
+  assert.equal(opts.cpuMoeLayers,8);
+  assert.equal(args[args.indexOf('--n-gpu-layers')+1],'0');
+  assert.equal(args[args.indexOf('--n-cpu-moe')+1],'8');
+  for(const flag of ['--gpu-layers=-1','--gpu-layers=3.4','--gpu-layers=257',
+      '--gpu-layers=Infinity','--cpu-moe-layers=-1','--cpu-moe-layers=999']) {
+    assert.throws(()=>parseArgs(['--model=./qwen3.gguf',flag]),/(nonnegative|safe layer)/);
+  }
+  const defaults=buildRunnerArgs(parseArgs(['--model=./qwen3.gguf']));
+  assert.ok(!defaults.includes('--n-gpu-layers'));
+  assert.ok(!defaults.includes('--n-cpu-moe'));
+});

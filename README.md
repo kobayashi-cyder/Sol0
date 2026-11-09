@@ -42,6 +42,16 @@ node tools/qwen_local.mjs --model=/path/to/Qwen3-0.6B-Q4_K_M.gguf
 
 ブラウザ版の接続先設定と、必要な実行バイナリ・ライセンス・テスト範囲は[Qwen GGUFローカル実行](docs/QWEN_GGUF.md)をご覧ください。Android APKでは本経路は利用できず、既存のWSPオフライン動作を維持します。
 
+## Kimiの公開重みをSol0で利用（LM Studio不要・PC実験段階）
+
+Kimi-VL、Kimi-Linear、Kimi-K2/K2.5、Kimi-Dev等について、利用者が別途取得したsafetensors形式の重みとconfig.jsonをチェックし、PCに別途インストールされたvLLMをオフライン優先・ローカル専用で起動する開発者向けツールを追加しました。**実際の推論はvLLMが担当し、Sol0独自のTransformer推論ではありません。** QwenのGGUF経路も維持します。
+
+~~~sh
+node tools/kimi_local.mjs --model-dir=/path/to/Kimi-VL-A3B-Instruct --allow-model-code
+~~~
+
+Kimi-VL-A3B-Instructの配布物は約32.8GBで、対応GPUと十分なメモリが必要です。モデルの入手・ライセンス・外部Pythonコードの安全性の確認は利用者が行います。詳細は[Sol0でKimiを使う](docs/KIMI_LOCAL.md)。実際のQwen/Kimiモデルで応答を返すか確認するには、モデル起動後に[ローカル実接続試験](tools/local_model_smoke.mjs)を実行します。同じ公開質問による比較は[能力別ローカル評価](tools/compare_model_capabilities.mjs)を使い、コードは自動実行せず、人間の評価を別途記録します。Android APKにはモデルを同梱せず、ネットワーク権限も追加しません。
+
 ## 移行時の重要修正
 
 - Enterは改行、Ctrl+Enter / Cmd+Enterと送信ボタンが送信。日本語IME変換中は誤送信しない。
