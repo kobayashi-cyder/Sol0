@@ -2922,6 +2922,10 @@ function rename(){const c=current(),name=prompt('会話名を入力してくだ�
 function download(content,name,type){const blob=new Blob([content],{type});const href=URL.createObjectURL(blob);const a=el('a');a.href=href;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(href),3000);}
 function exportJson(){save();download(JSON.stringify({...db,exported_at:new Date().toISOString(),app_version:ENGINE_VERSION},null,2),'solzero_v012_backup.json','application/json;charset=utf-8');sidebarClose();}
 function exportMd(){const c=current();const out=[`# ${c.title}`,'','Sol-Zero チャット記録',...c.messages.flatMap(m=>[`## ${m.role==='user'?'ユーザー':'Sol-Zero'}`,'',m.text,''])];download(out.join('\n'),'solzero_chat.md','text/markdown;charset=utf-8');sidebarClose();}
+/**
+ * Import must be a two-phase commit: validate every optional WSP snapshot in
+ * detached objects, then persist. Do not change live engines on invalid data.
+ */
 function prepareBackupRuntime(parsed){
   const router=new engine.router.constructor();
   if(parsed.wsp && !router.restore(parsed.wsp))throw Error('WSP router');
