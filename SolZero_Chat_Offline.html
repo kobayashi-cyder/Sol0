@@ -2587,6 +2587,12 @@ class MaterialWSP {
   this.model=next;
   return {material,examples:this.model.experts[material].seen,patches:patches.length,weights};
  }
+ sampleTexture(material,raw={}){
+  assertMaterial(material);const expert=this.model.experts[material];
+  if(!expert)fail('未学習の材質です。参考画像を取り込んでください');
+  const {width,height,seed}=validateOptions({...raw,shape:'plane'});
+  return {width,height,data:quilt(expert.patches,expert.weights,width,height,seed),material};
+ }
  render(material,raw={}){
   assertMaterial(material);const expert=this.model.experts[material];
   if(!expert)fail('未学習の材質です。参考画像を取り込んでください');
@@ -2703,7 +2709,517 @@ function mountMaterialLab(studio,root,{notify,refresh}){
 return {mountMaterialLab};
 })();
 
+
+const {SCENE_LIMITS,SCENE_FIELDS,createScene,validateScene,cloneScene,clearScene,mergeProposal,renderSceneToRGBA} = (() => {
+/** Bounded common scene for cooperative WSP renderers. No pretrained model. */
+const SCENE_LIMITS=Object.freeze({min:64,max:384,maxPixels:384*384});
+const SCENE_FIELDS=Object.freeze(['depth','normalX','normalY','normalZ','albedoR','albedoG','albedoB','roughness','metallic','translucency','occlusion','diffuse','specular','shadow','detail','confidence']);
+const between=(x,min=0,max=1)=>Math.min(max,Math.max(min,x));
+function createScene(width,height){
+ if(!Number.isInteger(width)||!Number.isInteger(height)||width<SCENE_LIMITS.min||height<SCENE_LIMITS.min||width>SCENE_LIMITS.max||height>SCENE_LIMITS.max||width*height>SCENE_LIMITS.maxPixels)throw Error('WSP scene size invalid');
+ const count=width*height,scene={version:1,width,height,mask:new Uint8Array(count)};
+ for(const key of SCENE_FIELDS)scene[key]=new Float32Array(count);
+ scene.normalZ.fill(1);scene.roughness.fill(.65);scene.occlusion.fill(1);
+ scene.diffuse.fill(.65);scene.confidence.fill(.5);scene.mask.fill(1);
+ return scene;
+}
+function validateScene(scene){
+ if(!scene||scene.version!==1||!Number.isInteger(scene.width)||!Number.isInteger(scene.height)||scene.width<SCENE_LIMITS.min||scene.height<SCENE_LIMITS.min||scene.width>SCENE_LIMITS.max||scene.height>SCENE_LIMITS.max)return false;
+ const n=scene.width*scene.height;
+ return scene.mask instanceof Uint8Array&&scene.mask.length===n&&
+  SCENE_FIELDS.every(k=>scene[k] instanceof Float32Array&&scene[k].length===n);
+}
+function cloneScene(scene){
+ if(!validateScene(scene))throw Error('WSP scene invalid');
+ const result=createScene(scene.width,scene.height);result.mask.set(scene.mask);
+ for(const k of SCENE_FIELDS)result[k].set(scene[k]);
+ return result;
+}
+function clearScene(scene){
+ if(!validateScene(scene))throw Error('WSP scene invalid');
+ const empty=createScene(scene.width,scene.height);scene.mask.set(empty.mask);
+ for(const k of SCENE_FIELDS)scene[k].set(empty[k]);return scene;
+}
+function mergeProposal(scene,proposal,strength=1,refineMask=null){
+ if(!validateScene(scene)||!proposal||typeof proposal!=='object'||!Number.isFinite(strength)||strength<0||strength>1)throw Error('WSP proposal invalid');
+ const n=scene.width*scene.height,confidence=proposal.confidence;
+ if(!(confidence instanceof Float32Array)||confidence.length!==n)throw Error('WSP proposal confidence invalid');
+ if(refineMask!==null&&(!(refineMask instanceof Uint8Array)||refineMask.length!==n))throw Error('WSP refinement mask invalid');
+ if(proposal.mask!==undefined&&(!(proposal.mask instanceof Uint8Array)||proposal.mask.length!==n))throw Error('WSP mask invalid');
+ const entries=SCENE_FIELDS.filter(k=>k!=='confidence'&&proposal[k]!==undefined);
+ for(const key of entries)if(!(proposal[key] instanceof Float32Array)||proposal[key].length!==n)throw Error('WSP proposal channel invalid: '+key);
+ // Validation before any state mutation, not a partial update on malformed values.
+ for(let p=0;p<n;p++){
+  if(!Number.isFinite(confidence[p])||confidence[p]<0||confidence[p]>1)throw Error('WSP confidence outside bounds');
+  for(const key of entries)if(!Number.isFinite(proposal[key][p]))throw Error('WSP proposal nonfinite');
+ }
+ if(proposal.mask!==undefined)scene.mask.set(proposal.mask);
+ for(let p=0;p<n;p++){
+  const alpha=strength*confidence[p]*(refineMask?(refineMask[p]?.92:.18):1);
+  for(const key of entries){
+   const b=key==='detail'||key.startsWith('normal')?-1:0;
+   const a=scene[key][p],v=proposal[key][p];
+   scene[key][p]=between(a+(v-a)*alpha,b,key==='detail'?1:1);
+  }
+  scene.confidence[p]=between(scene.confidence[p]*(1-alpha)+confidence[p]*alpha);
+ }
+ if(entries.some(k=>k.startsWith('normal'))){
+  for(let p=0;p<n;p++)if(scene.mask[p]){
+   const x=scene.normalX[p],y=scene.normalY[p],z=scene.normalZ[p],norm=Math.hypot(x,y,z)||1;
+   scene.normalX[p]=x/norm;scene.normalY[p]=y/norm;scene.normalZ[p]=z/norm;
+  }
+ }
+ return scene;
+}
+function renderSceneToRGBA(scene){
+ if(!validateScene(scene))throw Error('WSP scene invalid');
+ const n=scene.width*scene.height,bytes=new Uint8ClampedArray(n*4);
+ for(let p=0;p<n;p++){
+  const i=p*4;
+  if(!scene.mask[p]){bytes[i]=17;bytes[i+1]=21;bytes[i+2]=31;bytes[i+3]=255;continue;}
+  const dif=between(scene.diffuse[p]),spec=between(scene.specular[p]),sh=between(scene.shadow[p]),occ=between(scene.occlusion[p]);
+  for(const [c,k] of ['albedoR','albedoG','albedoB'].entries()){
+   const linear=between(scene[k][p])*dif*(1-sh)*occ+spec+scene.detail[p];
+   const mapped=between(linear/(.88+.12*linear));
+   bytes[i+c]=Math.round(255*Math.pow(mapped,1/2.2));
+  }
+  bytes[i+3]=255;
+ }
+ return bytes;
+}
+
+return {SCENE_LIMITS,SCENE_FIELDS,createScene,validateScene,cloneScene,clearScene,mergeProposal,renderSceneToRGBA};
+})();
+
+
+const {COOP_SHAPES,COOP_LIGHTS,COOP_EXPERTS,ROUTER_FEATURES,validateCoopSpec,features,CooperativeWSP,routeExperts} = (() => {
+/** Small trainable WSP expert router; weights are local and auditable. */
+const COOP_SHAPES=Object.freeze(['sphere','cube','plane','tile']);
+const COOP_LIGHTS=Object.freeze(['soft','hard','side','top','studio']);
+const COOP_EXPERTS=Object.freeze(['shape','material','lighting','detail']);
+const ROUTER_FEATURES=9;
+const clip=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+function validateCoopSpec(input={}){
+ if(!input||typeof input!=='object'||Array.isArray(input))throw Error('WSP cooperation spec must be object');
+ const spec={width:input.width??256,height:input.height??256,seed:input.seed??2026,shape:input.shape??'sphere',
+  material:input.material??'stone',secondaryMaterial:input.secondaryMaterial??null,mix:input.mix??0,
+  light:input.light??'studio',steps:input.steps??4,targetQuality:input.targetQuality??.98,
+  detailLevel:input.detailLevel??.6,cooperation:input.cooperation??.8};
+ if(!Number.isInteger(spec.width)||!Number.isInteger(spec.height)||spec.width<64||spec.height<64||spec.width>384||spec.height>384||
+   !Number.isInteger(spec.seed)||spec.seed<0||spec.seed>0xffffffff||!COOP_SHAPES.includes(spec.shape)||
+   !COOP_LIGHTS.includes(spec.light)||!Number.isInteger(spec.steps)||spec.steps<1||spec.steps>8||
+   ![spec.targetQuality,spec.detailLevel,spec.cooperation,spec.mix].every(Number.isFinite)||
+   spec.targetQuality<.3||spec.targetQuality>.999||spec.detailLevel<0||spec.detailLevel>1||
+   spec.cooperation<0||spec.cooperation>1||spec.mix<0||spec.mix>1)throw Error('WSP cooperation spec outside bounds');
+ const materials=['skin','stone','wood','metal','glass','water','fabric','foliage'];
+ if(!materials.includes(spec.material)||(spec.secondaryMaterial!==null&&!materials.includes(spec.secondaryMaterial)))throw Error('WSP material invalid');
+ if(spec.secondaryMaterial===null&&spec.mix!==0)throw Error('secondary material required for mixture');
+ return spec;
+}
+function features(spec){
+ const s=validateCoopSpec(spec);
+ return [1,s.shape==='sphere'?1:0,s.shape==='cube'?1:0,
+  s.material==='metal'?1:0,s.material==='glass'?1:0,s.material==='water'?1:0,
+  ['side','hard'].includes(s.light)?1:0,s.detailLevel,s.cooperation];
+}
+const sigmoid=z=>z>=0?1/(1+Math.exp(-z)):Math.exp(z)/(1+Math.exp(z));
+function modelValid(x){
+ return x&&x.version===1&&Array.isArray(x.bias)&&x.bias.length===4&&
+  Array.isArray(x.weights)&&x.weights.length===4&&
+  [...x.bias,...x.weights.flat()].every(v=>typeof v==='number'&&Number.isFinite(v)&&Math.abs(v)<=8)&&
+  x.weights.every(row=>Array.isArray(row)&&row.length===ROUTER_FEATURES);
+}
+class CooperativeWSP {
+ constructor(){this.bias=[1.1,1,.9,.45];this.weights=Array.from({length:4},()=>Array(ROUTER_FEATURES).fill(0));this.history=[];}
+ snapshot(){return {version:1,bias:[...this.bias],weights:this.weights.map(row=>[...row])};}
+ restore(model){if(!modelValid(model))return false;this.bias=[...model.bias];this.weights=model.weights.map(row=>[...row]);this.history=[];return true;}
+ rollback(){const old=this.history.pop();if(!old)return false;this.bias=[...old.bias];this.weights=old.weights.map(x=>[...x]);return true;}
+ route(raw){
+  const x=features(raw),out={};
+  COOP_EXPERTS.forEach((name,k)=>{
+   const z=this.bias[k]+this.weights[k].reduce((v,w,i)=>v+w*x[i],0);
+   out[name]=.2+.8*sigmoid(z);
+  });
+  return out;
+ }
+ tune(spec,expert,target,rate=.14){
+  const k=COOP_EXPERTS.indexOf(expert),x=features(spec);
+  if(k<0||!Number.isFinite(target)||target<.2||target>1||!Number.isFinite(rate)||rate<=0||rate>.5)throw Error('WSP tuning bounds violated');
+  this.history.push(this.snapshot());if(this.history.length>16)this.history.shift();
+  const z=this.bias[k]+this.weights[k].reduce((v,w,i)=>v+w*x[i],0);
+  const y=sigmoid(z),pred=.2+.8*y;
+  const gradient=(pred-target)*.8*y*(1-y);
+  this.bias[k]=clip(this.bias[k]-rate*gradient,-8,8);
+  for(let i=0;i<x.length;i++)this.weights[k][i]=clip(this.weights[k][i]-rate*gradient*x[i],-8,8);
+  return {before:pred,after:this.route(spec)[expert]};
+ }
+ tuneFromCritic(spec,report){
+  if(!report||!['shapeScore','materialScore','lightingScore','seamScore'].every(k=>Number.isFinite(report[k])))throw Error('Critic report invalid');
+  const scores=[report.shapeScore,report.materialScore,report.lightingScore,report.seamScore];
+  const before=this.route(spec);
+  COOP_EXPERTS.forEach((name,k)=>{
+   const desired=clip(before[name]+.24*(1-clip(scores[k])),.2,1);
+   this.tune(spec,name,desired,.36);
+  });
+  return this.route(spec);
+ }
+}
+function routeExperts(spec,router=new CooperativeWSP()){return router.route(spec);}
+
+return {COOP_SHAPES,COOP_LIGHTS,COOP_EXPERTS,ROUTER_FEATURES,validateCoopSpec,features,CooperativeWSP,routeExperts};
+})();
+
+
+const {applyShapeExpert} = (() => {
+/** Deterministic analytic geometry expert for a bounded surface scene. */
+function applyShapeExpert(scene,spec){
+ const {width:w,height:h}=scene,n=w*h;
+ const mask=new Uint8Array(n),depth=new Float32Array(n),normalX=new Float32Array(n),
+  normalY=new Float32Array(n),normalZ=new Float32Array(n),occlusion=new Float32Array(n),confidence=new Float32Array(n);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const p=y*w+x,u=((x+.5)/w-.5)*2.28,v=((y+.5)/h-.5)*2.28;
+  let nx=0,ny=0,nz=1,d=.5,inside=true;
+  if(spec.shape==='sphere'){
+   const rr=u*u+v*v;inside=rr<=1;
+   if(inside){nx=u;ny=v;nz=Math.sqrt(Math.max(0,1-rr));d=.1+.8*nz;}
+  }else if(spec.shape==='cube'){
+   inside=Math.abs(u)<.82&&Math.abs(v)<.82;
+   if(inside){
+    if(v<-.34+u*.15){nx=.07;ny=-.75;nz=.65;d=.56;}
+    else if(u>.35){nx=.73;ny=.13;nz=.67;d=.35;}
+    else{nx=0;ny=0;nz=1;d=.65;}
+   }
+  }else if(spec.shape==='tile'){
+   const ax=Math.abs(u),ay=Math.abs(v),r=.16;
+   const dx=Math.max(0,ax-(.93-r)),dy=Math.max(0,ay-(.93-r));
+   inside=dx*dx+dy*dy<=r*r&&ax<.93&&ay<.93;
+   if(inside){const edge=Math.max(ax,ay);nz=.7+.3*(1-Math.pow(edge/.93,8));nx=u*.08;ny=v*.08;d=.42+nz*.2;}
+  }
+  if(inside){
+   mask[p]=1;normalX[p]=nx;normalY[p]=ny;normalZ[p]=nz;
+   depth[p]=d;occlusion[p]=spec.shape==='sphere'?.86+.14*nz:.95;
+  }
+  confidence[p]=1;
+ }
+ return {mask,depth,normalX,normalY,normalZ,occlusion,confidence};
+}
+
+return {applyShapeExpert};
+})();
+
+
+const {applyMaterialExpert} = (() => {
+/** Learned RGB patch memory projected into a shared WSP surface scene. */
+const DEFAULTS={skin:[.64,.02,.26],stone:[.91,.01,.01],wood:[.71,.01,.02],metal:[.26,.93,.01],
+ glass:[.09,.01,.92],water:[.11,.01,.78],fabric:[.88,.01,.03],foliage:[.78,.01,.05]};
+const clip=(v,a=0,b=1)=>Math.min(b,Math.max(a,v));
+function surface(memory,material,width,height,seed){
+ if(!memory||!memory.has(material)||typeof memory.sampleTexture!=='function')throw Error('WSP material not learned: '+material);
+ return {pixels:memory.sampleTexture(material,{width,height,seed}).data,
+  stats:memory.model.experts[material].weights,traits:DEFAULTS[material]};
+}
+function applyMaterialExpert(scene,spec,memory){
+ const w=scene.width,h=scene.height,n=w*h,main=surface(memory,spec.material,w,h,spec.seed);
+ const second=spec.secondaryMaterial?surface(memory,spec.secondaryMaterial,w,h,spec.seed^0x314159):null;
+ const albedoR=new Float32Array(n),albedoG=new Float32Array(n),albedoB=new Float32Array(n),
+  roughness=new Float32Array(n),metallic=new Float32Array(n),translucency=new Float32Array(n),confidence=new Float32Array(n);
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const p=y*w+x,i=p*4;
+  // Smooth spatial transition for mixed materials rather than a global average.
+  const mix=second?clip(spec.mix*(.48+.52*x/Math.max(1,w-1))*2):0;
+  const sample=(c)=>clip((main.pixels[i+c]*(1-mix)+((second?.pixels[i+c])??0)*mix)/255);
+  albedoR[p]=sample(0);albedoG[p]=sample(1);albedoB[p]=sample(2);
+  const roughMain=clip(main.traits[0]+(main.stats[2]-.4)*.13);
+  roughness[p]=clip(roughMain*(1-mix)+(second?clip(second.traits[0]+(second.stats[2]-.4)*.13)*mix:0));
+  metallic[p]=clip(main.traits[1]*(1-mix)+(second?second.traits[1]*mix:0));
+  translucency[p]=clip(main.traits[2]*(1-mix)+(second?second.traits[2]*mix:0));
+  confidence[p]=scene.mask[p]?.96:0;
+ }
+ return {albedoR,albedoG,albedoB,roughness,metallic,translucency,confidence};
+}
+
+return {applyMaterialExpert};
+})();
+
+
+const {applyLightingExpert} = (() => {
+/** Analytic lighting expert; physically inspired, not learned scene understanding. */
+const clip=(v,a=0,b=1)=>Math.min(b,Math.max(a,v));
+const PRESETS={soft:[-.37,-.34,.86,.68,.3],hard:[-.44,-.55,.71,.97,.12],
+ side:[-.83,-.1,.55,.85,.17],top:[-.12,-.87,.48,.78,.2],studio:[-.42,-.48,.76,.82,.31]};
+function applyLightingExpert(scene,spec){
+ const n=scene.width*scene.height,light=PRESETS[spec.light];
+ if(!light)throw Error('WSP light preset invalid');
+ const len=Math.hypot(light[0],light[1],light[2]),L=light.slice(0,3).map(v=>v/len);
+ const diffuse=new Float32Array(n),specular=new Float32Array(n),shadow=new Float32Array(n),confidence=new Float32Array(n);
+ for(let p=0;p<n;p++)if(scene.mask[p]){
+  const nx=scene.normalX[p],ny=scene.normalY[p],nz=scene.normalZ[p];
+  const ndl=clip(nx*L[0]+ny*L[1]+nz*L[2]);
+  const rough=clip(scene.roughness[p]),metal=clip(scene.metallic[p]),trans=clip(scene.translucency[p]);
+  const ambient=.18+light[4],strength=light[3];
+  diffuse[p]=clip(ambient+strength*ndl*(1-.3*metal));
+  const hx=L[0],hy=L[1],hz=L[2]+1,hl=Math.hypot(hx,hy,hz);
+  const ndh=clip((nx*hx+ny*hy+nz*hz)/hl);
+  const exponent=4+100*Math.pow(1-rough,2);
+  specular[p]=clip(Math.pow(ndh,exponent)*(0.08+0.35*metal+.2*trans)*(1+.12*(1-rough)));
+  shadow[p]=clip((1-ndl)*(.16+.08*(1-spec.cooperation)));
+  confidence[p]=.94;
+ }
+ return {diffuse,specular,shadow,confidence};
+}
+
+return {applyLightingExpert};
+})();
+
+
+const {applyDetailExpert} = (() => {
+/** Deterministic detail + seam blending; bounded color correction. */
+const clip=(v,a=0,b=1)=>Math.min(b,Math.max(a,v));
+function hash(x,y,seed){let h=(Math.imul(x,374761393)+Math.imul(y,668265263)+Math.imul(seed,2246822519))|0;h=Math.imul(h^(h>>>13),1274126177);return((h^(h>>>16))>>>0)/4294967295;}
+function applyDetailExpert(scene,spec){
+ const w=scene.width,h=scene.height,n=w*h,albedoR=new Float32Array(scene.albedoR),
+  albedoG=new Float32Array(scene.albedoG),albedoB=new Float32Array(scene.albedoB),
+  detail=new Float32Array(n),confidence=new Float32Array(n),channels=['albedoR','albedoG','albedoB'];
+ const amp=spec.detailLevel*(spec.material==='glass'?.008:spec.material==='metal'?.015:.028);
+ for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+  const p=y*w+x;if(!scene.mask[p])continue;
+  const seam=(x%12<=1||y%12<=1);
+  const noise=hash(x,y,spec.seed)-.5;
+  const wave=spec.material==='wood'?Math.sin(y*.12+noise*.8):spec.material==='fabric'?Math.sin(x*.9)*Math.sin(y*.9):0;
+  detail[p]=clip((noise*.65+wave*.25)*amp,-.08,.08);
+  if(seam){
+   for(let c=0;c<3;c++){
+    const val=scene[channels[c]];
+    const smooth=(val[p-1]+val[p+1]+val[p-w]+val[p+w])*.25;
+    [albedoR,albedoG,albedoB][c][p]=clip(.52*val[p]+.48*smooth);
+   }
+  }
+  confidence[p]=seam?.9:.55;
+ }
+ return {albedoR,albedoG,albedoB,detail,confidence};
+}
+
+return {applyDetailExpert};
+})();
+
+
+const {evaluateScene} = (() => {
+/** Explicit internal artifact proxy metrics. NOT photographic realism evaluation. */
+const clip=(v,a=0,b=1)=>Math.min(b,Math.max(a,v));
+const TRAITS={skin:[.64,.02],stone:[.91,.01],wood:[.71,.01],metal:[.26,.93],glass:[.09,.01],
+ water:[.11,.01],fabric:[.88,.01],foliage:[.78,.01]};
+function evaluateScene(scene,spec){
+ const {width:w,height:h}=scene,n=w*h,refineMask=new Uint8Array(n);
+ let shapes=0,lights=0,materials=0,artifacts=0,seams=0,inside=0,seamCount=0;
+ for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+  const p=y*w+x;if(!scene.mask[p])continue;inside++;
+  const norm=Math.hypot(scene.normalX[p],scene.normalY[p],scene.normalZ[p]);
+  const shapeError=Math.min(1,Math.abs(norm-1));shapes+=shapeError;
+  const rough=scene.roughness[p],metal=scene.metallic[p];
+  const expected=TRAITS[spec.material],matError=.5*(Math.abs(rough-expected[0])+Math.abs(metal-expected[1]));
+  materials+=Math.min(1,matError);
+  const lightError=Math.max(0,scene.diffuse[p]+scene.specular[p]-1)+Math.max(0,-scene.diffuse[p]);
+  lights+=Math.min(1,lightError);
+  const albedo=(scene.albedoR[p]+scene.albedoG[p]+scene.albedoB[p])/3;
+  const extreme=albedo<.012||albedo>.985?1:0;artifacts+=extreme;
+  let anomaly=0;
+  if((x%12===0||y%12===0)&&scene.mask[p-1]&&scene.mask[p+1]&&scene.mask[p-w]&&scene.mask[p+w]){
+   for(const k of ['albedoR','albedoG','albedoB']){
+    const v=scene[k][p],near=(scene[k][p-1]+scene[k][p+1]+scene[k][p-w]+scene[k][p+w])*.25;
+    anomaly+=Math.max(0,Math.abs(v-near)-.08)/3;
+   }
+   seams+=Math.min(1,anomaly*2.5);seamCount++;
+  }
+  if(shapeError>.06||matError>.14||lightError>.09||anomaly>.06||extreme)refineMask[p]=1;
+ }
+ const count=Math.max(inside,1);
+ const report={shapeScore:clip(1-shapes/count),materialScore:clip(1-materials/count),
+  lightingScore:clip(1-lights/count),seamScore:clip(1-seams/Math.max(seamCount,1)),
+  artifactScore:clip(1-artifacts/count),refineMask};
+ report.total=clip(.19*report.shapeScore+.2*report.materialScore+.2*report.lightingScore+
+  .26*report.seamScore+.15*report.artifactScore);
+ report.flagged=refineMask.reduce((sum,v)=>sum+v,0);
+ report.metric='internal-artifact-proxy';
+ return report;
+}
+
+return {evaluateScene};
+})();
+
+
+const {generateCooperativeImage} = (() => {
+/** Offline cooperative WSP image engine with bounded critic-guided fine tuning.
+ * Objective reports are artifact proxies, never claims of human realism.
+ */
+
+
+
+
+
+
+
+async function generateCooperativeImage(materialWsp,rawSpec={},router=new CooperativeWSP()){
+ const spec=validateCoopSpec(rawSpec);
+ if(!materialWsp||typeof materialWsp.has!=='function'||!materialWsp.has(spec.material)||
+    (spec.secondaryMaterial&&!materialWsp.has(spec.secondaryMaterial)))
+   throw Error('WSP協調生成：材質の学習が必要です');
+ if(!(router instanceof CooperativeWSP))throw Error('WSP協調生成：routerが不正です');
+ const working=new CooperativeWSP();if(!working.restore(router.snapshot()))throw Error('WSP協調生成：WSP重みが不正です');
+ const trace=[];let best=null,previousMask=null;
+ for(let step=0;step<spec.steps;step++){
+  const route=working.route(spec),scene=createScene(spec.width,spec.height);
+  const amount=name=>Math.min(1,route[name]+(1-route[name])*spec.cooperation*.25);
+  mergeProposal(scene,applyShapeExpert(scene,spec),amount('shape'));
+  mergeProposal(scene,applyMaterialExpert(scene,spec,materialWsp),amount('material'));
+  mergeProposal(scene,applyLightingExpert(scene,spec),amount('lighting'));
+  // Preserve complete surfaces; local deficit mask only guides detail refinements.
+  mergeProposal(scene,applyDetailExpert(scene,spec),amount('detail'),previousMask);
+  const report=evaluateScene(scene,spec);
+  trace.push({iteration:step+1,total:report.total,shapeScore:report.shapeScore,
+   materialScore:report.materialScore,lightingScore:report.lightingScore,
+   seamScore:report.seamScore,artifactScore:report.artifactScore,flagged:report.flagged});
+  if(!best||report.total>best.report.total+1e-8){
+   best={data:renderSceneToRGBA(scene),report,route:{...route},wsp:working.snapshot(),iteration:step+1};
+  }
+  if(report.total>=spec.targetQuality)break;
+  previousMask=report.refineMask;
+  working.tuneFromCritic(spec,report);
+  // Permit UI updates without nondeterministic computation order.
+  if(step%2===1)await Promise.resolve();
+ }
+ const {refineMask,...compactReport}=best.report;
+ return {width:spec.width,height:spec.height,data:best.data,report:compactReport,
+  trace,route:best.route,stepsUsed:trace.length,bestIteration:best.iteration,
+  tunedRouter:best.wsp,source:'WSP-cooperative-experimental'};
+}
+
+return {generateCooperativeImage};
+})();
+
+
+const {mountCooperativeLab} = (() => {
+/** Cooperative WSP lab. Uses existing material snapshots, offline and permission-free. */
+
+
+
+const MATERIAL_KEY='sol0_wsp_material_experts_v1',ROUTER_KEY='sol0_wsp_cooperative_router_v1';
+const LABELS={skin:'肌',stone:'石',wood:'木',metal:'金属',glass:'ガラス',water:'水',fabric:'布',foliage:'植物'};
+function element(tag,text){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e;}
+function field(root,title,values,defaultValue){
+ const lab=element('label',title),select=element('select');select.setAttribute('aria-label',title);
+ for(const [v,t] of values){const option=element('option',t);option.value=String(v);select.append(option);}
+ select.value=String(defaultValue);lab.append(select);lab.className='field';root.append(lab);return select;
+}
+function number(root,title,value,min,max,step){
+ const lab=element('label',title),inp=element('input');inp.type='number';inp.min=String(min);inp.max=String(max);
+ inp.step=String(step);inp.value=String(value);inp.setAttribute('aria-label',title);lab.className='field';lab.append(inp);root.append(lab);return inp;
+}
+function makeButton(root,label,handler){
+ const btn=element('button',label);btn.type='button';btn.className='btn';btn.addEventListener('click',handler);root.append(btn);return btn;
+}
+function downloadJSON(data){
+ const blob=new Blob([JSON.stringify(data)],{type:'application/json'}),url=URL.createObjectURL(blob),a=element('a');
+ a.href=url;a.download='Sol0_WSP_cooperative_weights.json';document.body.append(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),10000);
+}
+function loadMaterial(){
+ const raw=localStorage.getItem(MATERIAL_KEY);
+ if(!raw||raw.length>850000)throw Error('材質学習ラボで参考画像を学習してください');
+ const model=new MaterialWSP();if(!model.restore(JSON.parse(raw)))throw Error('材質WSPの保存データが不正です');
+ return model;
+}
+function mountCooperativeLab(studio,root,helpers={}){
+ const router=new CooperativeWSP();
+ let loadWarning='';
+ try{
+  const saved=localStorage.getItem(ROUTER_KEY);
+  if(saved&&(saved.length>15000||!router.restore(JSON.parse(saved))))throw Error('重み形式エラー');
+ }catch(e){loadWarning=e.message;}
+ const save=()=>{const data=JSON.stringify(router.snapshot());if(data.length>15000)throw Error('WSP重み容量超過');localStorage.setItem(ROUTER_KEY,data);};
+ const h=element('h3','🧠 WSP協調生成・微調整ラボ');root.append(h);
+ const explanation=element('p','既存材質学習＋形状・材質・照明・微細描画の4専門家をWSPで融合し、内部アーティファクト評価で反復します。評価点は写実度を保証せず、写真生成AIではありません。すべて端末内で処理します。');
+ explanation.className='muted';root.append(explanation);
+ const controls=element('div');controls.className='buttons';root.append(controls);
+ const mats=WSP_MATERIALS.map(x=>[x,LABELS[x]]);
+ const material=field(controls,'主材質',mats,'stone');
+ const secondary=field(controls,'副材質',[['','使用しない'],...mats],'');
+ const mix=number(controls,'材質混合率',.4,0,1,.05);
+ const shape=field(controls,'形状',COOP_SHAPES.map(x=>[x,x]),'sphere');
+ const light=field(controls,'照明',COOP_LIGHTS.map(x=>[x,x]),'studio');
+ const size=field(controls,'出力サイズ',[[128,'128×128'],[256,'256×256'],[320,'320×320']],'256');
+ const seed=number(controls,'シード',2026,0,4294967295,1);
+ const steps=number(controls,'評価反復回数',4,1,8,1);
+ const detail=number(controls,'微細表現',.65,0,1,.05);
+ const coop=number(controls,'WSP協調度',.8,0,1,.05);
+ const target=number(controls,'内部評価目標',.985,.3,.999,.005);
+ const actions=element('div');actions.className='buttons';root.append(actions);
+ const status=element('p',loadWarning?'重み復元失敗：'+loadWarning:'材質を学習した後、協調生成できます。');
+ status.className='listentry';status.dataset.coopStatus='true';root.append(status);
+ const preview=element('canvas');preview.width=256;preview.height=256;
+ preview.style.cssText='display:block;max-width:100%;height:auto;max-height:320px;border:1px solid var(--line);border-radius:12px;margin:8px 0';
+ root.append(preview);
+ const score=element('p','内部評価：未実行');score.className='muted';root.append(score);
+ const getSpec=()=>validateCoopSpec({width:Number(size.value),height:Number(size.value),material:material.value,
+  secondaryMaterial:secondary.value||null,mix:secondary.value?Number(mix.value):0,
+  shape:shape.value,light:light.value,seed:Number(seed.value),steps:Number(steps.value),
+  targetQuality:Number(target.value),detailLevel:Number(detail.value),cooperation:Number(coop.value)});
+ let busy=false,last=null;
+ const operate=async fn=>{
+  if(busy||studio.busy||studio.uiBusy)return;busy=true;
+  try{await fn();}catch(e){status.textContent='協調生成エラー：'+e.message;}
+  finally{busy=false;}
+ };
+ makeButton(actions,'協調生成 PNG',()=>operate(async()=>{
+  const spec=getSpec(),memory=loadMaterial();
+  const result=await generateCooperativeImage(memory,spec,router);
+  preview.width=result.width;preview.height=result.height;
+  preview.getContext('2d').putImageData(new ImageData(result.data,result.width,result.height),0,0);
+  const blob=await new Promise((resolve,reject)=>preview.toBlob(x=>x?resolve(x):reject(Error('PNGエンコード失敗')),'image/png'));
+  const bytes=new Uint8Array(await blob.arrayBuffer());
+  const asset=await studio.add('coop_'+spec.material+'_'+Date.now()+'.png','image/png',bytes,'image',{
+   source:result.source,material:spec.material,secondaryMaterial:spec.secondaryMaterial,shape:spec.shape,
+   light:spec.light,seed:spec.seed,stepsUsed:result.stepsUsed,internalScore:result.report.total,
+   route:result.route,metric:result.report.metric});
+  last={spec,result};
+  status.textContent='協調生成保存：'+asset.name+' / '+result.stepsUsed+'回評価';
+  score.textContent='内部評価 '+result.report.total.toFixed(4)+' / パッチ境界 '+result.report.seamScore.toFixed(4)+' / 最良反復 '+result.bestIteration;
+  helpers.notify?.('WSP協調生成を作品に保存しました');
+  helpers.refreshAssets?.();
+ }));
+ makeButton(actions,'自動微調整重みを採用',()=>operate(async()=>{
+  if(!last)throw Error('先に協調生成してください');
+  if(last.result.trace.length<2)throw Error('微調整を実施した結果がありません');
+  if(!router.restore(last.result.tunedRouter))throw Error('採用する重みが不正です');
+  save();status.textContent='WSP協調重みを保存しました（内部評価に対する微調整）';
+ }));
+ const expert=field(controls,'手動微調整対象',COOP_EXPERTS.map(x=>[x,x]),'lighting');
+ const strength=number(controls,'目標寄与率',.9,.2,1,.05);
+ makeButton(actions,'WSP重みを微調整',()=>operate(async()=>{
+  const spec=getSpec(),before=router.route(spec)[expert.value];
+  for(let i=0;i<10;i++)router.tune(spec,expert.value,Number(strength.value),.5);
+  save();status.textContent='WSP学習済み：'+expert.value+' '+before.toFixed(3)+' → '+router.route(spec)[expert.value].toFixed(3);
+ }));
+ makeButton(actions,'直前の重みを戻す',()=>operate(async()=>{
+  if(!router.rollback())throw Error('戻す履歴がありません');
+  save();status.textContent='直前のWSP微調整を戻しました';
+ }));
+ makeButton(actions,'協調WSP重みJSON書き出し',()=>operate(async()=>downloadJSON(router.snapshot())));
+ const imp=element('input');imp.type='file';imp.accept='.json,application/json';imp.className='hidden';root.append(imp);
+ makeButton(actions,'協調WSP重みJSON読み込み',()=>imp.click());
+ imp.addEventListener('change',()=>operate(async()=>{
+  const f=imp.files?.[0];imp.value='';
+  if(!f||f.size>15000)throw Error('JSONファイルがありません、または容量超過');
+  const candidate=JSON.parse(await f.text());
+  const tmp=new CooperativeWSP();if(!tmp.restore(candidate)||!router.restore(candidate))throw Error('不正なWSP重みです');
+  save();status.textContent='協調WSP重みを読み込み保存しました';
+ }));
+}
+
+return {mountCooperativeLab};
+})();
+
 /** Unified offline media workspace for Sol-Zero. No external AI/services. */
+
 
 
 const STORE='solzero_studio_v012_recipe',DB_NAME='solzero_media_v012';
@@ -2989,6 +3505,7 @@ class MediaStudio {
   undo.addEventListener('click',()=>{if(this.uiBusy||this.busy)return;this.wsp.rollback();this.saveRecipe();reportRefresh();});ww.append(edit,undo);root.append(report);reportRefresh();
   root.append(element('h3','作品に含まれる素材（最大16件／合計55MB）'));const list=element('div');root.append(list);this.drawAssets(list,notify);
   mountMaterialLab(this,root,{notify,refresh:()=>this.render(root,helpers)});
+  mountCooperativeLab(this,root,{notify,refreshAssets:()=>this.drawAssets(list,notify)});
  }
  drawAssets(root,notify){for(const url of this.previewUrls)URL.revokeObjectURL(url);this.previewUrls.clear();root.replaceChildren();const total=this.assets.reduce((s,a)=>s+a.bytes.length,0);root.append(element('p',`${this.assets.length}件・${(total/1024/1024).toFixed(2)} MiB。画像・音声・動画を同じプロジェクトとしてZIPに保存できます。`));
   for(const a of this.assets){const entry=element('div');entry.className='listentry';entry.append(element('b',`${a.kind}: ${a.name} (${Math.round(a.bytes.length/1024)}KB)`));const blob=new Blob([a.bytes],{type:a.type}),url=URL.createObjectURL(blob);this.previewUrls.add(url);const media=a.type.startsWith('image/')?element('img'):a.type.startsWith('audio/')?element('audio'):a.type.startsWith('video/')?element('video'):null;
