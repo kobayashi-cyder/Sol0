@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   INFERENCE_LIMITS, InferenceRouter, createLocalProvider, createWSPProvider,
-  createNetworkPolicy, createHTTPChatProvider, validateModelRecord
+  createNetworkPolicy, createHTTPChatProvider, validateModelRecord, normalizeChatContent
 } from '../chat_web/inference_gateway.js';
 
 const record = { modelId: 'locally-hosted-model', source: 'user supplied local server', license: 'user-verified license', sha256: null };
@@ -190,4 +190,34 @@ test('streamed UTF-8 split across chunks is decoded correctly', async () => {
     })
   });
   assert.equal(await provider.generate('test', { consent: true }), 'こんにちは');
+});
+
+test('generic chat response accepts bounded text parts from compatible servers', () => {
+  assert.equal(normalizeChatContent({ choices: [{ message: { content: 'plain' } }] }), 'plain');
+  assert.equal(normalizeChatContent({ choices: [{ message: { content: [
+    { type: 'text', text: 'こんにちは' }, { type: 'text', text: ' 世界' }
+  ] } }] }), 'こんにちは 世界');
+  assert.throws(() => normalizeChatContent({ choices: [{ message: { content: [
+    { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }
+  ] } }] }), /Unsupported/);
+  assert.throws(() => normalizeChatContent({ choices: [{ message: { content: [
+    { type: 'text', text: 'x'.repeat(INFERENCE_LIMITS.outputChars + 1) }
+  ] } }] }), /bounded/);
+  assert.throws(() => normalizeChatContent({ choices: [{ message: { content: [] } }] }), /Unsupported/);
+  // Missing text must retain the pre-existing bounded-output error contract.
+  assert.throws(() => normalizeChatContent({ choices: [{ message: { content: null } }] }), /bounded/);
+  assert.throws(() => normalizeChatContent({ choices: [{ message: {} }] }), /bounded/);
+});
+
+test('generic HTTP adapter normalizes text parts without sending history', async () => {
+  const provider = createHTTPChatProvider({
+    endpoint, modelRecord: record, networkPolicy: policy(),
+    fetchImpl: async (_url, options) => {
+      assert.deepEqual(JSON.parse(options.body).messages, [{ role: 'user', content: 'test' }]);
+      return { ok: true, text: async () => JSON.stringify({
+        choices: [{ message: { content: [{ type: 'text', text: 'portable response' }] } }]
+      }) };
+    }
+  });
+  assert.equal(await provider.generate('test', { consent: true }), 'portable response');
 });

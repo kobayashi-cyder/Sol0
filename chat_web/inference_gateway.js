@@ -199,13 +199,41 @@ export function createHTTPChatProvider({
         const raw = await readBoundedResponse(response);
         let payload;
         try { payload = JSON.parse(raw); } catch { throw new Error('Model server response is not JSON'); }
-        return checkOutput(payload?.choices?.[0]?.message?.content);
+        return normalizeChatContent(payload);
       } finally {
         clearTimeout(timeout);
         signal?.removeEventListener('abort', abort);
       }
     }
   });
+}
+
+/**
+ * Normalize the text-only subset of OpenAI-compatible chat responses.
+ * Some servers return content as a string; others use typed text parts.
+ * Reject non-text parts rather than silently claiming multimodal support.
+ */
+export function normalizeChatContent(payload) {
+  const message = payload?.choices?.[0]?.message;
+  const content = message?.content;
+  // Preserve the established bounded-output error for missing text responses.
+  if (content == null) return checkOutput(content);
+  if (typeof content === 'string') return checkOutput(content);
+  if (!Array.isArray(content) || content.length === 0 || content.length > 128) {
+    throw new Error('Unsupported model response content');
+  }
+  let result = '';
+  for (const part of content) {
+    if (!part || typeof part !== 'object' || Array.isArray(part)
+        || part.type !== 'text' || typeof part.text !== 'string') {
+      throw new Error('Unsupported model response content part');
+    }
+    result += part.text;
+    if (result.length > INFERENCE_LIMITS.outputChars) {
+      throw new Error('Inference output is not bounded text');
+    }
+  }
+  return checkOutput(result);
 }
 
 /**
