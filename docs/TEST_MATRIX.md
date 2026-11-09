@@ -8,6 +8,7 @@
 | HTML内JS | 抽出後に`node --check` | 構文検査成功 |
 | ブラウザ | scripts/browser_*_smoke.py | チャット、WSP、メディア、改行、送信が成功 |
 | 構図画像 | node --test tests/scene_director.test.mjs / python scripts/browser_scene_smoke.py | 左右の複数主題・配色・画風・プレビュー再現性・実PNGエンコード、GIF8秒制限が合格 |
+| ComfyUI写実画像API | node --test tests/image_provider_comfyui.test.mjs / python scripts/browser_comfyui_smoke.py | 毎回の同意、local URL限定、txt2imgワークフロー・履歴・PNG検証・IndexedDB保存、元オフライン描画維持 |
 | バックアップ復元の安全性 | `node --test tests/chat_persistence.test.mjs`、`python scripts/browser_backup_smoke.py` | 不正JSON・破損WSP・容量超過で会話・知識・資料・WSPが変更されず、長文コードの正常復元が再読込後も一致すること |
 | 任意モデル接続UI | `python scripts/browser_model_smoke.py` | 既定WSP、事前設定時の通信ゼロ、拒否時の入力保持、同意した1件だけの送信、既存コマンド維持をモックで確認 |
 | APK | Androidワークフロー | 単体テスト・ビルド・署名検査・HTML一致 |
