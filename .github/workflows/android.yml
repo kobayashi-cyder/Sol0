@@ -136,19 +136,60 @@ jobs:
           bash -n android/tests/emulator_runner.sh
           python -m py_compile android/tests/emulator_smoke.py
       - name: Boot Android 17 API 37 and run same offline WebView regression
-        uses: reactivecircus/android-emulator-runner@v2
+        shell: bash
         env:
           EXPECTED_ANDROID_API: '37'
-        with:
-          channel: canary
-          api-level: '37.2'
-          arch: x86_64
-          target: google_apis_ps16k
-          emulator-build: '15917651'
-          emulator-options: '-no-window -gpu swangle_indirect -no-snapshot -noaudio -no-boot-anim'
-          profile: pixel_6
-          ram-size: 4096M
-          disk-size: 6144M
-          disable-animations: true
-          emulator-boot-timeout: 900
-          script: bash android/tests/emulator_runner.sh
+          ANDROID_SERIAL: emulator-5554
+        run: |
+          set -euo pipefail
+          sdk_tools="$ANDROID_HOME/cmdline-tools/latest/bin"
+          test -x "$sdk_tools/sdkmanager" || sdk_tools="$ANDROID_HOME/cmdline-tools/16.0/bin"
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          image='system-images;android-37.2;google_apis_ps16k;x86_64'
+          (set +o pipefail; yes | "$sdk_tools/sdkmanager" --licenses >/dev/null)
+          "$sdk_tools/sdkmanager" --install "$image" --channel=3
+
+          work="$(mktemp -d "$RUNNER_TEMP/sol0-api37.XXXXXX")"
+          curl --fail --silent --show-error --retry 3 -o "$work/emulator.zip" \
+            https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip
+          unzip -q "$work/emulator.zip" -d "$work"
+          export ANDROID_AVD_HOME="$work/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          printf 'no\n' | "$sdk_tools/avdmanager" create avd \
+            --name sol0-api37 --package "$image" --device pixel_6
+          printf '\nhw.cpu.ncore=2\nhw.ramSize=4096M\ndisk.dataPartition.size=6144M\n' \
+            >> "$ANDROID_AVD_HOME/sol0-api37.avd/config.ini"
+
+          adb start-server
+          "$work/emulator/emulator" -port 5554 -avd sol0-api37 \
+            -no-window -gpu swangle_indirect -no-snapshot -noaudio -no-boot-anim \
+            >"$work/emulator.log" 2>&1 &
+          emulator_pid=$!
+          cleanup() {
+            local status=$?
+            if (( status != 0 )); then tail -n 100 "$work/emulator.log"; fi
+            timeout 15s adb emu kill || kill "$emulator_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          # API 37 can set sys.boot_completed before these services answer ADB.
+          deadline=$((SECONDS + 900))
+          until [[ "$(timeout 10s adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]] &&
+            timeout 10s adb shell '
+              cmd package path android &&
+              input keyevent 82 &&
+              settings put global window_animation_scale 0 &&
+              settings put global transition_animation_scale 0 &&
+              settings put global animator_duration_scale 0
+            ' >/dev/null 2>&1; do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo 'Android 17 emulator exited during boot'
+              exit 1
+            fi
+            if (( SECONDS >= deadline )); then
+              echo 'Timed out waiting for Android 17 package, input and settings services'
+              exit 1
+            fi
+            sleep 2
+          done
+          bash android/tests/emulator_runner.sh
