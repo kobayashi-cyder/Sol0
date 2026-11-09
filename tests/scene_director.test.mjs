@@ -10,6 +10,7 @@ const recipe={
 
 function tracedContext({nativeEllipse=true}={}){
  const calls=[];
+ const saved=[];
  const ctx={
   fillStyle:'',strokeStyle:'',lineWidth:1,globalAlpha:1,
   beginPath(){calls.push('begin')},
@@ -17,12 +18,12 @@ function tracedContext({nativeEllipse=true}={}){
   stroke(){calls.push('stroke:'+this.strokeStyle)},
   rect(x,y,w,h){calls.push(['rect',x,y,w,h])},
   arc(x,y,r){calls.push(['arc',x,y,r])},
-  fillRect(x,y,w,h){calls.push(['fillRect',x,y,w,h,this.fillStyle])},
+  fillRect(x,y,w,h){calls.push(['fillRect',x,y,w,h,typeof this.fillStyle==='string'?this.fillStyle:'gradient'])},
   moveTo(x,y){calls.push(['move',x,y])},
   lineTo(x,y){calls.push(['line',x,y])},
   closePath(){calls.push('close')},
-  save(){calls.push('save')},
-  restore(){calls.push('restore')},
+  save(){saved.push({alpha:this.globalAlpha});calls.push('save')},
+  restore(){const last=saved.pop();this.globalAlpha=last.alpha;calls.push('restore')},
   createLinearGradient(){return {addColorStop(){}}},
   ...(nativeEllipse?{ellipse(x,y,rx,ry){calls.push(['ellipse',x,y,rx,ry]);}}:{})
  };
