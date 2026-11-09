@@ -20,6 +20,8 @@
 3. 20万文字上限、user本文3200文字上限、保存JSON340万文字超拒否、入力JSON400万文字超拒否を確認。
 4. 保存不可・容量超過はユーザーに明示し、保存成功と誤表示しない。
 
+Android17物理端末の事前確認には `python android/tests/physical_preflight.py --serial=端末のADB番号 --apk=検証済みAPK` を使用し、端末シリアル番号を記録しない。詳細は [実機検証手順](../android/PHYSICAL_PREFLIGHT.md)。この読み取り専用チェックとIME・保存・メディア手動試験は別の判定とする。
+
 ## 実機出荷前チェック
 
 Android機種名、OS、WebView、APK SHA256、テスト操作、結果を記録。デバッグAPKの生成は製品版完成を意味せず、CI成功も実機試験の代わりにはなりません。
