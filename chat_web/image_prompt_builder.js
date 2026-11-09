@@ -24,7 +24,7 @@ const THEME=Object.freeze({space:'star-filled space',sea:'sea and ocean waves',
  flowers:'flower garden',rain:'rainfall',snow:'snow-covered landscape',
  sunset:'sunset sky',abstract:'visually cohesive environment'});
 
-function boundedText(s,max=180){
+function boundedImagePromptText(s,max=180){
  if(typeof s!=='string'||!s.trim())throw Error('画像生成の説明文を入力してください');
  if(s.length>max)throw Error('画像生成の説明文が長すぎます');
  return s.trim();
@@ -34,7 +34,7 @@ export function buildPhotorealPrompt(raw,{
  negativePrompt='blurry, watermark, signature, low resolution',
  maxCharacters=1600
 }={}){
- const prompt=boundedText(raw?.prompt);
+ const prompt=boundedImagePromptText(raw?.prompt);
  const seed=Number(raw?.seed);
  const width=Number(raw?.width),height=Number(raw?.height);
  if(!Number.isSafeInteger(seed)||seed<0||seed>0xffffffff||
