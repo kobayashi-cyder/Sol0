@@ -2450,6 +2450,8 @@ class MediaWSP{
  restore(s){if(!s||s.version!==1||!Array.isArray(s.weights)||s.weights.length!==4||!s.weights.every(x=>Array.isArray(x)&&x.length===3&&x.every(n=>typeof n==='number'&&Number.isFinite(n)&&Math.abs(n)<=1.5)))return false;this.weights=s.weights.map(x=>[...x]);this.history=[];return true;}
 }
 
+
+const {MaterialWSP,WSP_MATERIALS,WSP_MATERIAL_LIMITS} = (() => {
 /** Sol0 WSP material-memory generator (experimental).
  * Learns and synthesizes bounded RGB texture patches from user-supplied local images.
  * Kimi's visual-expert separation is a design reference, not copied code or weights.
@@ -2597,6 +2599,11 @@ class MaterialWSP {
  }
 }
 
+return {MaterialWSP,WSP_MATERIALS,WSP_MATERIAL_LIMITS};
+})();
+
+
+const {mountMaterialLab} = (() => {
 /** UI adapter for Sol0's offline, image-conditioned WSP material experiments. */
 
 const STORAGE_KEY='sol0_wsp_material_experts_v1';
@@ -2692,6 +2699,9 @@ function mountMaterialLab(studio,root,{notify,refresh}){
  }));
  if(!persisted)root.append(el('p','注意：保存済み材質重みを復元できませんでした。重みJSONのバックアップを使用してください。'));
 }
+
+return {mountMaterialLab};
+})();
 
 /** Unified offline media workspace for Sol-Zero. No external AI/services. */
 
