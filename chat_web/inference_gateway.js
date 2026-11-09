@@ -216,6 +216,8 @@ export function createHTTPChatProvider({
 export function normalizeChatContent(payload) {
   const message = payload?.choices?.[0]?.message;
   const content = message?.content;
+  // Preserve the established bounded-output error for missing text responses.
+  if (content == null) return checkOutput(content);
   if (typeof content === 'string') return checkOutput(content);
   if (!Array.isArray(content) || content.length === 0 || content.length > 128) {
     throw new Error('Unsupported model response content');
