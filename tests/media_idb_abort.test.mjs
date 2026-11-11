@@ -10,14 +10,14 @@ const end=source.indexOf('\nexport class MediaStudio',start);
 assert.ok(start>=0&&end>start,'replacement function must be present');
 const fnSource=source.slice(start,end);
 
-function harness({failPut=false,failAbort=false}={}){
+function harness({failPut=false,failPutAt=null,failAbort=false}={}){
  const old=[{id:'existing',bytes:[1,2,3]}];
- let persisted=structuredClone(old),working,aborts=0,closed=0,commits=0;
+ let persisted=structuredClone(old),working,aborts=0,closed=0,commits=0,puts=0;
  const tx={
   oncomplete:null,onabort:null,
   objectStore(){return {
    clear(){working=[];},
-   put(asset){if(failPut)throw new Error('injected synchronous put error');working.push(asset);}
+   put(asset){if(failPut||++puts===failPutAt)throw new Error('injected synchronous put error');working.push(asset);}
   };},
   abort(){aborts++;if(failAbort)throw new Error('abort failed');working=null;queueMicrotask(()=>tx.onabort?.());}
  };
@@ -42,6 +42,16 @@ function harness({failPut=false,failAbort=false}={}){
 test('synchronous put exception aborts clear and preserves existing assets',async()=>{
  const h=harness({failPut:true});
  assert.equal(await h.run([{id:'replacement'}]),false);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(h.persisted,[{id:'existing',bytes:[1,2,3]}]);
+ assert.equal(h.aborts,1);
+ assert.equal(h.commits,0);
+ assert.equal(h.closed,1);
+});
+
+test('second put exception rolls back queued clear and first put',async()=>{
+ const h=harness({failPutAt:2});
+ assert.equal(await h.run([{id:'first'},{id:'second'}]),false);
  await new Promise(resolve=>setImmediate(resolve));
  assert.deepEqual(h.persisted,[{id:'existing',bytes:[1,2,3]}]);
  assert.equal(h.aborts,1);
